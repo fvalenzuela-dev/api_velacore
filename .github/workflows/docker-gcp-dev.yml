@@ -1,0 +1,25 @@
+name: GCP Deploy (DEV)
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  build_and_deploy:
+    name: Build & Deploy
+    permissions:
+      contents: read
+      id-token: write
+    uses: fvalenzuela-dev/.github/.github/workflows/build-and-push-docker-gcp.yml@main
+    with:
+      image_name: "api-xxxxxxx-dev"
+      dockerfile_path: "./Dockerfile"
+      artifact_registry_region: "us-central1"
+      artifact_registry_repository: "api-xxxxxxx-dev"
+      cloudrun_service: "api-xxxxxxx-dev"
+      cloudrun_region: "us-central1"
+    secrets:
+      gcp_project_id: ${{ secrets.GCP_PROJECT_ID_DEV }}
+      gcp_workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER_DEV }}
+      gcp_service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_DEV }}

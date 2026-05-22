@@ -1,0 +1,25 @@
+name: 🏷️✨ Label Beautifier
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run mode (only show changes, do not apply them)'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+jobs:
+  beautify:
+    permissions:
+      contents: write  # Necesario para modificar etiquetas
+      issues: write
+    uses: fvalenzuela-dev/.github/.github/workflows/label-beautifier.yml@main
+    with:
+      dry_run: ${{ inputs.dry_run }}
+    secrets:
+      # Pasa el secreto necesario (debes tenerlo configurado en el repo origen o en la organización)
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

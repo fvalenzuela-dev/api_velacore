@@ -1,4 +1,8 @@
+import unittest
+
 from api_velacore.core.config import get_settings
+
+_CHECK = unittest.TestCase()
 
 
 def test_settings_use_velacore_environment_prefix(monkeypatch) -> None:
@@ -9,7 +13,7 @@ def test_settings_use_velacore_environment_prefix(monkeypatch) -> None:
     try:
         settings = get_settings()
 
-        assert settings.app_name == "env-api"
-        assert settings.app_version == "1.2.3"
+        _CHECK.assertEqual(settings.app_name, "env-api")
+        _CHECK.assertEqual(settings.app_version, "1.2.3")
     finally:
         get_settings.cache_clear()

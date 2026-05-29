@@ -1,8 +1,12 @@
+import unittest
+
 from fastapi.testclient import TestClient
 
 from api_velacore.main import app
 from api_velacore.schemas.health import HealthResponse
 from api_velacore.services.health import get_health_status
+
+_CHECK = unittest.TestCase()
 
 
 def test_health_returns_ok() -> None:
@@ -10,9 +14,9 @@ def test_health_returns_ok() -> None:
 
     response = client.get("/health")
 
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("application/json")
-    assert response.json() == {"status": "ok"}
+    _CHECK.assertEqual(response.status_code, 200)
+    _CHECK.assertTrue(response.headers["content-type"].startswith("application/json"))
+    _CHECK.assertEqual(response.json(), {"status": "ok"})
 
 
 def test_openapi_schema_is_available() -> None:
@@ -20,16 +24,21 @@ def test_openapi_schema_is_available() -> None:
 
     response = client.get("/openapi.json")
 
-    assert response.status_code == 200
+    _CHECK.assertEqual(response.status_code, 200)
     schema = response.json()
-    assert schema["info"] == {"title": "api_velacore", "version": "0.1.0"}
-    assert schema["paths"]["/health"]["get"]["responses"]["200"]["content"] == {
-        "application/json": {"schema": {"$ref": "#/components/schemas/HealthResponse"}}
-    }
+    _CHECK.assertEqual(schema["info"], {"title": "api_velacore", "version": "0.1.0"})
+    _CHECK.assertEqual(
+        schema["paths"]["/health"]["get"]["responses"]["200"]["content"],
+        {
+            "application/json": {
+                "schema": {"$ref": "#/components/schemas/HealthResponse"}
+            }
+        },
+    )
 
 
 def test_health_service_returns_typed_ok_response() -> None:
     health = get_health_status()
 
-    assert isinstance(health, HealthResponse)
-    assert health.status == "ok"
+    _CHECK.assertIsInstance(health, HealthResponse)
+    _CHECK.assertEqual(health.status, "ok")

@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "api-velacore"
+version = "0.1.0"
+description = "FastAPI backend for Velacore."
+readme = "README.md"
+requires-python = "==3.14.5"
+dependencies = [
+    "fastapi==0.124.0",
+    "pydantic-settings==2.12.0",
+    "uvicorn[standard]==0.38.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "coverage[toml]==7.14.1",
+    "httpx==0.28.1",
+    "mypy==1.19.0",
+    "pytest==9.0.1",
+    "ruff==0.14.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/api_velacore"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+mypy_path = "src"
+packages = ["api_velacore"]

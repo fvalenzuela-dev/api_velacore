@@ -61,24 +61,8 @@ jobs:
   codacy_coverage:
     name: Codacy Coverage
     needs: [build_and_test]
-    runs-on: ubuntu-latest
-    env:
+    uses: fvalenzuela-dev/.github/.github/workflows/codacy-coverage.yml@main
+    with:
+      coverage_report_path: "coverage/lcov.info"
+    secrets:
       CODACY_PROJECT_TOKEN: ${{ secrets.CODACY_PROJECT_TOKEN }}
-    steps:
-      - name: Download coverage report
-        uses: actions/download-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage
-
-      - name: Upload coverage to Codacy
-        if: env.CODACY_PROJECT_TOKEN != ''
-        uses: codacy/codacy-coverage-reporter-action@89d6c85cfafaec52c72b6c5e8b2878d33104c699
-        with:
-          project-token: ${{ env.CODACY_PROJECT_TOKEN }}
-          coverage-reports: coverage/lcov.info
-
-      - name: Skip Codacy upload when token is missing
-        if: env.CODACY_PROJECT_TOKEN == ''
-        run: |
-          echo "CODACY_PROJECT_TOKEN is not configured; coverage artifact was uploaded for inspection."

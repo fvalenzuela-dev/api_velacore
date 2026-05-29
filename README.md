@@ -50,6 +50,9 @@ Start the development server with reload enabled:
 ```bash
 uvicorn api_velacore.main:app --reload
 ```
+```bash
+.venv/bin/python -m uvicorn api_velacore.main:app --reload --port 8766
+```
 
 Use an explicit host or port when needed:
 

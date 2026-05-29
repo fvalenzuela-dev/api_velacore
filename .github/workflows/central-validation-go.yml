@@ -5,10 +5,35 @@ on:
     branches-ignore:
       - main
       - develop
+    paths:
+      # Legacy Go validation is kept for repositories with Go project files.
+      - "go.mod"
+      - "go.sum"
+      - "**/*.go"
 
 jobs:
+  detect_go_project:
+    name: Detect Go project
+    runs-on: ubuntu-latest
+    outputs:
+      has_go_mod: ${{ steps.detect.outputs.has_go_mod }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Detect go.mod
+        id: detect
+        run: |
+          if [ -f go.mod ]; then
+            echo "has_go_mod=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_go_mod=false" >> "$GITHUB_OUTPUT"
+          fi
+
   verificar_version:
     name: Control de Versiones
+    needs: [detect_go_project]
+    if: ${{ needs.detect_go_project.outputs.has_go_mod == 'true' }}
     uses: fvalenzuela-dev/.github/.github/workflows/version-check-new.yml@main
     with:
       version_file: "VERSION"
@@ -17,6 +42,8 @@ jobs:
       GITHUB_TOKEN_CUSTOM: ${{ secrets.GITHUB_TOKEN }}
   build_and_test:
     name: Build & Test
+    needs: [detect_go_project]
+    if: ${{ needs.detect_go_project.outputs.has_go_mod == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -48,9 +75,26 @@ jobs:
 
   codacy_coverage:
     name: Codacy Coverage
-    needs: [build_and_test]
-    uses: fvalenzuela-dev/.github/.github/workflows/codacy-coverage.yml@main
-    with:
-      coverage_report_path: "coverage/lcov.info"
-    secrets:
+    needs: [detect_go_project, build_and_test]
+    if: ${{ needs.detect_go_project.outputs.has_go_mod == 'true' }}
+    runs-on: ubuntu-latest
+    env:
       CODACY_PROJECT_TOKEN: ${{ secrets.CODACY_PROJECT_TOKEN }}
+    steps:
+      - name: Download coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage
+
+      - name: Upload coverage to Codacy
+        if: env.CODACY_PROJECT_TOKEN != ''
+        uses: codacy/codacy-coverage-reporter-action@v1
+        with:
+          project-token: ${{ env.CODACY_PROJECT_TOKEN }}
+          coverage-reports: coverage/lcov.info
+
+      - name: Skip Codacy upload when token is missing
+        if: env.CODACY_PROJECT_TOKEN == ''
+        run: |
+          echo "CODACY_PROJECT_TOKEN is not configured; coverage artifact was uploaded for inspection."

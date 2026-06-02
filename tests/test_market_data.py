@@ -1,16 +1,22 @@
 import unittest
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 import api_velacore.api.routes.market_data as market_data_routes
 from api_velacore.infrastructure.market_data import (
+    BinanceKlineRequest,
     BinanceMarketDataClient,
     MarketDataProviderError,
     YahooChartRequest,
     YahooFinanceClient,
+    _datetime_to_epoch_seconds,
+    _float_at,
+    _float_or_none,
 )
 from api_velacore.main import app
 from api_velacore.schemas.market_data import MarketDataCandle, MarketDataResponse
@@ -242,3 +248,229 @@ def test_yahoo_client_normalizes_chart_payload() -> None:
     _CHECK.assertEqual(result.symbol, "AAPL")
     _CHECK.assertEqual(result.range, "1mo")
     _CHECK.assertEqual(result.candles[0].close, 103.0)
+
+
+class StubYahooFinanceClient(YahooFinanceClient):
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.payload = payload
+        self.seen_symbol = ""
+        self.seen_params: Mapping[str, str | int | bool] = {}
+        self.seen_timeout = 0.0
+
+    def _get_json(
+        self,
+        symbol: str,
+        *,
+        params: Mapping[str, str | int | bool],
+        timeout: float,
+    ) -> dict[str, Any]:
+        self.seen_symbol = symbol
+        self.seen_params = params
+        self.seen_timeout = timeout
+        return self.payload
+
+
+class StubBinanceMarketDataClient(BinanceMarketDataClient):
+    def __init__(self, rows: list[Any]) -> None:
+        self.rows = rows
+        self.seen_params: Mapping[str, str | int] = {}
+        self.seen_timeout = 0.0
+
+    def _get_json_rows(
+        self,
+        *,
+        params: Mapping[str, str | int],
+        timeout: float,
+    ) -> list[Any]:
+        self.seen_params = params
+        self.seen_timeout = timeout
+        return self.rows
+
+
+def _http_status_error(status_code: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("GET", "https://example.test")
+    response = httpx.Response(status_code, request=request)
+    return httpx.HTTPStatusError("provider failed", request=request, response=response)
+
+
+def test_market_data_low_level_conversion_helpers() -> None:
+    _CHECK.assertEqual(_datetime_to_epoch_seconds("2026-01-01"), 1767225600)
+    _CHECK.assertEqual(_datetime_to_epoch_seconds("2026-01-01T00:00:00Z"), 1767225600)
+    _CHECK.assertEqual(_float_or_none("1.5"), 1.5)
+    _CHECK.assertIsNone(_float_or_none("bad"))
+    _CHECK.assertIsNone(_float_or_none(object()))
+    _CHECK.assertEqual(_float_at(["2.5"], 0), 2.5)
+    _CHECK.assertIsNone(_float_at([], 0))
+
+
+def test_datetime_helper_rejects_invalid_iso_dates() -> None:
+    try:
+        _datetime_to_epoch_seconds("not-a-date")
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 422)
+        _CHECK.assertEqual(
+            exc.message, "Dates must use ISO format, for example 2026-01-31"
+        )
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+
+def test_yahoo_build_params_supports_events_and_explicit_dates() -> None:
+    request = YahooChartRequest(
+        symbol="AAPL",
+        period=None,
+        interval="1d",
+        start="2026-01-01",
+        end="2026-01-02",
+        prepost=True,
+        events="div|split|earn",
+    )
+
+    params = YahooFinanceClient()._build_params(request)
+
+    _CHECK.assertEqual(params["interval"], "1d")
+    _CHECK.assertEqual(params["includePrePost"], True)
+    _CHECK.assertEqual(params["events"], "div|split|earn")
+    _CHECK.assertEqual(params["period1"], 1767225600)
+    _CHECK.assertEqual(params["period2"], 1767312000)
+
+
+def test_yahoo_fetch_chart_uses_params_and_normalizes_response() -> None:
+    payload = {
+        "chart": {
+            "result": [
+                {
+                    "timestamp": [1777593600, "invalid", 1777680000],
+                    "indicators": {
+                        "quote": [
+                            {
+                                "open": [100.0, 1.0, None],
+                                "high": [105.0, 1.0, 2.0],
+                                "low": [99.0, 1.0, 1.0],
+                                "close": [103.0, 1.0, 1.5],
+                                "volume": [1234, 1, 2],
+                            }
+                        ]
+                    },
+                }
+            ],
+            "error": None,
+        }
+    }
+    client = StubYahooFinanceClient(payload)
+    request = YahooChartRequest(
+        symbol="AAPL",
+        period="1mo",
+        interval="1d",
+        start=None,
+        end=None,
+        prepost=False,
+        events=None,
+    )
+
+    response = client.fetch_chart(request, timeout=3.0)
+
+    _CHECK.assertEqual(client.seen_symbol, "AAPL")
+    _CHECK.assertEqual(client.seen_params["range"], "1mo")
+    _CHECK.assertEqual(client.seen_timeout, 3.0)
+    _CHECK.assertEqual(len(response.candles), 1)
+    _CHECK.assertEqual(response.candles[0].close, 103.0)
+
+
+def test_yahoo_normalization_rejects_error_and_empty_payloads() -> None:
+    client = YahooFinanceClient()
+    request = YahooChartRequest("AAPL", "1mo", "1d", None, None, False, None)
+    error_payload = {"chart": {"result": None, "error": {"description": "No data"}}}
+
+    try:
+        client._normalize(request=request, data=error_payload)
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 404)
+        _CHECK.assertEqual(exc.message, "No data")
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+    try:
+        client._normalize(request=request, data={"chart": {"result": []}})
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 404)
+        _CHECK.assertEqual(exc.message, "Yahoo Finance returned no chart data")
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+    try:
+        client._normalize(
+            request=request, data={"chart": {"result": [{"timestamp": []}]}}
+        )
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 404)
+        _CHECK.assertEqual(exc.message, "Yahoo Finance returned no candles")
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+
+def test_provider_http_error_mapping() -> None:
+    try:
+        YahooFinanceClient()._raise_http_error(_http_status_error(429))
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 429)
+        _CHECK.assertEqual(exc.message, "Yahoo Finance rate limit exceeded")
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+    try:
+        BinanceMarketDataClient()._raise_http_error(_http_status_error(400))
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 422)
+        _CHECK.assertEqual(exc.message, "Invalid Binance symbol or parameters")
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+    try:
+        BinanceMarketDataClient()._raise_http_error(_http_status_error(429))
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 429)
+        _CHECK.assertEqual(exc.message, "Binance rate limit exceeded")
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+
+def test_binance_fetch_klines_uses_params_and_normalizes_response() -> None:
+    client = StubBinanceMarketDataClient(
+        [[1499040000000, "1", "2", "0.5", "1.5", "10"]]
+    )
+    request = BinanceKlineRequest(
+        symbol="btcusdt",
+        interval="1h",
+        start_time=1,
+        end_time=2,
+        time_zone="0",
+        limit=10,
+    )
+
+    response = client.fetch_klines(request, timeout=4.0)
+
+    _CHECK.assertEqual(client.seen_params["symbol"], "BTCUSDT")
+    _CHECK.assertEqual(client.seen_params["startTime"], 1)
+    _CHECK.assertEqual(client.seen_params["endTime"], 2)
+    _CHECK.assertEqual(client.seen_params["timeZone"], "0")
+    _CHECK.assertEqual(client.seen_timeout, 4.0)
+    _CHECK.assertEqual(response.candles[0].close, 1.5)
+
+
+def test_binance_build_params_omits_empty_optional_values() -> None:
+    request = BinanceKlineRequest("ETHUSDT", "1d", None, None, None, 500)
+
+    params = BinanceMarketDataClient()._build_params(request)
+
+    _CHECK.assertEqual(params, {"symbol": "ETHUSDT", "interval": "1d", "limit": 500})
+
+
+def test_binance_client_rejects_short_rows() -> None:
+    try:
+        BinanceMarketDataClient()._normalize_row([1, "1"])
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 502)
+        _CHECK.assertEqual(exc.message, "Binance returned malformed kline data")
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")

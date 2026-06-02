@@ -130,6 +130,8 @@ mypy
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/health` | Returns service health status. |
+| `GET` | `/market-data/yahoo/{symbol}` | Returns normalized Yahoo Finance OHLCV candles for stocks and ETFs. |
+| `GET` | `/market-data/binance/{symbol}` | Returns normalized Binance Spot OHLCV candles for crypto pairs. |
 | `GET` | `/openapi.json` | Returns the OpenAPI schema. |
 
 Health check:
@@ -142,6 +144,61 @@ Expected response:
 
 ```json
 {"status":"ok"}
+```
+
+Yahoo Finance market data example:
+
+```bash
+curl "http://127.0.0.1:8000/market-data/yahoo/AAPL?period=1mo&interval=1d"
+```
+
+Supported Yahoo query parameters:
+
+| Parameter | Purpose | Values / notes |
+|-----------|---------|----------------|
+| `period` | Relative time range | `1d`, `5d`, `1mo`, `3mo`, `6mo`, `1y`, `2y`, `5y`, `10y`, `ytd`, `max` |
+| `interval` | Candle temporalidad | `1m`, `2m`, `5m`, `15m`, `30m`, `60m`, `90m`, `1h`, `1d`, `5d`, `1wk`, `1mo`, `3mo` |
+| `start` / `end` | Explicit ISO date range | Use instead of `period`; both are required together. |
+| `prepost` | Include pre/post-market data | Boolean, default `false`. |
+| `events` | Yahoo corporate events filter | For example `div|split|earn`. |
+
+Binance market data example:
+
+```bash
+curl "http://127.0.0.1:8000/market-data/binance/BTCUSDT?interval=1h&limit=100"
+```
+
+Supported Binance query parameters:
+
+| Parameter | Purpose | Values / notes |
+|-----------|---------|----------------|
+| `interval` | Candle temporalidad | `1s`, `1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `6h`, `8h`, `12h`, `1d`, `3d`, `1w`, `1M` |
+| `startTime` / `endTime` | Explicit UTC range | Unix timestamps in milliseconds. |
+| `timeZone` | Kline interval timezone | Examples: `0`, `8`, `-1:00`, `05:45`. |
+| `limit` | Maximum candles | Default `500`, maximum `1000`. |
+
+Market data responses are normalized and stateless; the backend does not persist
+candles in the database or local storage.
+
+Example response shape:
+
+```json
+{
+  "provider": "binance",
+  "symbol": "BTCUSDT",
+  "interval": "1h",
+  "range": null,
+  "candles": [
+    {
+      "timestamp": "2026-05-01T00:00:00Z",
+      "open": 65000.0,
+      "high": 66000.0,
+      "low": 64500.0,
+      "close": 65500.0,
+      "volume": 123.45
+    }
+  ]
+}
 ```
 
 ## Swagger and OpenAPI

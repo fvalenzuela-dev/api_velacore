@@ -160,7 +160,7 @@ Supported Yahoo query parameters:
 | `interval` | Candle temporalidad | `1m`, `2m`, `5m`, `15m`, `30m`, `60m`, `90m`, `1h`, `1d`, `5d`, `1wk`, `1mo`, `3mo` |
 | `start` / `end` | Explicit ISO date range | Use instead of `period`; both are required together. |
 | `prepost` | Include pre/post-market data | Boolean, default `false`. |
-| `events` | Yahoo corporate events filter | For example `div|split|earn`. |
+| `events` | Yahoo corporate events filter | For example `div\|split\|earn`. |
 
 Binance market data example:
 

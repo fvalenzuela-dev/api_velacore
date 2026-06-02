@@ -2,8 +2,10 @@ from api_velacore.infrastructure.market_data import (
     BINANCE_INTERVALS,
     YAHOO_INTERVALS,
     YAHOO_PERIODS,
+    BinanceKlineRequest,
     BinanceMarketDataClient,
     MarketDataProviderError,
+    YahooChartRequest,
     YahooFinanceClient,
 )
 from api_velacore.schemas.market_data import MarketDataResponse
@@ -30,7 +32,7 @@ def get_yahoo_market_data(
             422,
         )
     yahoo_client = client or YahooFinanceClient()
-    return yahoo_client.fetch_chart(
+    request = YahooChartRequest(
         symbol=symbol,
         period=period,
         interval=interval,
@@ -39,6 +41,7 @@ def get_yahoo_market_data(
         prepost=prepost,
         events=events,
     )
+    return yahoo_client.fetch_chart(request)
 
 
 def get_binance_market_data(
@@ -56,7 +59,7 @@ def get_binance_market_data(
     if limit < 1 or limit > 1000:
         raise MarketDataProviderError("Binance limit must be between 1 and 1000", 422)
     binance_client = client or BinanceMarketDataClient()
-    return binance_client.fetch_klines(
+    request = BinanceKlineRequest(
         symbol=symbol,
         interval=interval,
         start_time=start_time,
@@ -64,3 +67,4 @@ def get_binance_market_data(
         time_zone=time_zone,
         limit=limit,
     )
+    return binance_client.fetch_klines(request)

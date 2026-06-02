@@ -9,6 +9,7 @@ import api_velacore.api.routes.market_data as market_data_routes
 from api_velacore.infrastructure.market_data import (
     BinanceMarketDataClient,
     MarketDataProviderError,
+    YahooChartRequest,
     YahooFinanceClient,
 )
 from api_velacore.main import app
@@ -226,12 +227,16 @@ def test_yahoo_client_normalizes_chart_payload() -> None:
         }
     }
 
-    result = YahooFinanceClient()._normalize(
+    request = YahooChartRequest(
         symbol="aapl",
-        interval="1d",
-        data=payload,
         period="1mo",
+        interval="1d",
+        start=None,
+        end=None,
+        prepost=False,
+        events=None,
     )
+    result = YahooFinanceClient()._normalize(request=request, data=payload)
 
     _CHECK.assertEqual(result.provider, "yahoo")
     _CHECK.assertEqual(result.symbol, "AAPL")

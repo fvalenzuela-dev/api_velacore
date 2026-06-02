@@ -252,6 +252,7 @@ def test_yahoo_client_normalizes_chart_payload() -> None:
 
 class StubYahooFinanceClient(YahooFinanceClient):
     def __init__(self, payload: dict[str, Any]) -> None:
+        """Create a Yahoo client stub with a fixed payload."""
         self.payload = payload
         self.seen_symbol = ""
         self.seen_params: Mapping[str, str | int | bool] = {}
@@ -272,6 +273,7 @@ class StubYahooFinanceClient(YahooFinanceClient):
 
 class StubBinanceMarketDataClient(BinanceMarketDataClient):
     def __init__(self, rows: list[Any]) -> None:
+        """Create a Binance client stub with fixed kline rows."""
         self.rows = rows
         self.seen_params: Mapping[str, str | int] = {}
         self.seen_timeout = 0.0

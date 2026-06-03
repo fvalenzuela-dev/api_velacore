@@ -1,6 +1,7 @@
 import unittest
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Literal
 
 import httpx
@@ -8,10 +9,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api_velacore.api.routes.market_data as market_data_routes
+from api_velacore.core.config import get_settings
 from api_velacore.infrastructure.market_data import (
     BinanceKlineRequest,
     BinanceMarketDataClient,
     MarketDataProviderError,
+    TwelveDataMarketDataClient,
+    TwelveDataTimeSeriesRequest,
     YahooChartRequest,
     YahooFinanceClient,
     _datetime_to_epoch_seconds,
@@ -22,6 +26,7 @@ from api_velacore.main import app
 from api_velacore.schemas.market_data import MarketDataCandle, MarketDataResponse
 from api_velacore.services.market_data import (
     get_binance_market_data,
+    get_twelve_data_market_data,
     get_yahoo_market_data,
 )
 
@@ -29,7 +34,7 @@ _CHECK = unittest.TestCase()
 
 
 def _sample_response(
-    provider: Literal["yahoo", "binance"],
+    provider: Literal["yahoo", "binance", "twelve-data"],
     symbol: str,
 ) -> MarketDataResponse:
     return MarketDataResponse(
@@ -100,6 +105,34 @@ def test_binance_endpoint_returns_normalized_market_data(
     _CHECK.assertEqual(body["candles"][0]["volume"], 1234.0)
 
 
+def test_twelve_data_endpoint_returns_normalized_market_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_twelve_data_market_data(**kwargs: object) -> MarketDataResponse:
+        _CHECK.assertEqual(kwargs["symbol"], "QQQ")
+        _CHECK.assertEqual(kwargs["interval"], "1day")
+        _CHECK.assertEqual(kwargs["outputsize"], 10)
+        _CHECK.assertEqual(kwargs["asset_type"], "etf")
+        return _sample_response("twelve-data", "QQQ")
+
+    monkeypatch.setattr(
+        market_data_routes,
+        "get_twelve_data_market_data",
+        fake_get_twelve_data_market_data,
+    )
+    client = TestClient(app)
+
+    response = client.get(
+        "/market-data/twelve-data/QQQ?interval=1day&outputsize=10&asset_type=etf"
+    )
+
+    _CHECK.assertEqual(response.status_code, 200)
+    body = response.json()
+    _CHECK.assertEqual(body["provider"], "twelve-data")
+    _CHECK.assertEqual(body["symbol"], "QQQ")
+    _CHECK.assertEqual(body["candles"][0]["open"], 100.0)
+
+
 def test_provider_errors_are_mapped_to_http_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -152,6 +185,123 @@ def test_binance_service_validates_limit() -> None:
     except MarketDataProviderError as exc:
         _CHECK.assertEqual(exc.status_code, 422)
         _CHECK.assertEqual(exc.message, "Binance limit must be between 1 and 1000")
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+
+def test_twelve_data_service_validates_request() -> None:
+    try:
+        get_twelve_data_market_data(
+            symbol="AAPL",
+            interval="1d",
+            outputsize=10,
+            start_date=None,
+            end_date=None,
+            exchange=None,
+            asset_type="stock",
+            prepost=False,
+            api_key="test-key",
+            client=TwelveDataMarketDataClient(),
+        )
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 422)
+        _CHECK.assertEqual(exc.message, "Unsupported Twelve Data interval")
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+    try:
+        get_twelve_data_market_data(
+            symbol="AAPL",
+            interval="1day",
+            outputsize=5001,
+            start_date=None,
+            end_date=None,
+            exchange=None,
+            asset_type="stock",
+            prepost=False,
+            api_key="test-key",
+            client=TwelveDataMarketDataClient(),
+        )
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 422)
+        _CHECK.assertEqual(
+            exc.message, "Twelve Data outputsize must be between 1 and 5000"
+        )
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+    try:
+        get_twelve_data_market_data(
+            symbol="AAPL",
+            interval="1day",
+            outputsize=10,
+            start_date="2026-01-01",
+            end_date=None,
+            exchange=None,
+            asset_type="stock",
+            prepost=False,
+            api_key="test-key",
+            client=TwelveDataMarketDataClient(),
+        )
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 422)
+        _CHECK.assertEqual(
+            exc.message,
+            "Both start_date and end_date are required when using explicit dates",
+        )
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+    try:
+        get_twelve_data_market_data(
+            symbol="AAPL",
+            interval="1day",
+            outputsize=10,
+            start_date=None,
+            end_date=None,
+            exchange=None,
+            asset_type="fund",
+            prepost=False,
+            api_key="test-key",
+            client=TwelveDataMarketDataClient(),
+        )
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 422)
+        _CHECK.assertEqual(exc.message, "Unsupported Twelve Data asset_type")
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+
+def test_twelve_data_service_requires_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("VELACORE_TWELVE_DATA_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+    get_settings.cache_clear()
+    try:
+        _assert_twelve_data_service_requires_api_key()
+    finally:
+        get_settings.cache_clear()
+
+
+def _assert_twelve_data_service_requires_api_key() -> None:
+    try:
+        get_twelve_data_market_data(
+            symbol="AAPL",
+            interval="1day",
+            outputsize=10,
+            start_date=None,
+            end_date=None,
+            exchange=None,
+            asset_type="stock",
+            prepost=False,
+            api_key=None,
+            client=TwelveDataMarketDataClient(),
+        )
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 503)
+        _CHECK.assertEqual(exc.message, "Twelve Data API key is not configured")
     else:
         _CHECK.fail("Expected MarketDataProviderError")
 
@@ -289,6 +439,24 @@ class StubBinanceMarketDataClient(BinanceMarketDataClient):
         return self.rows
 
 
+class StubTwelveDataMarketDataClient(TwelveDataMarketDataClient):
+    def __init__(self, payload: dict[str, Any]) -> None:
+        """Create a Twelve Data client stub with a fixed payload."""
+        self.payload = payload
+        self.seen_params: Mapping[str, str | int | bool] = {}
+        self.seen_timeout = 0.0
+
+    def _get_json(
+        self,
+        *,
+        params: Mapping[str, str | int | bool],
+        timeout: float,
+    ) -> dict[str, Any]:
+        self.seen_params = params
+        self.seen_timeout = timeout
+        return self.payload
+
+
 def _http_status_error(status_code: int) -> httpx.HTTPStatusError:
     request = httpx.Request("GET", "https://example.test")
     response = httpx.Response(status_code, request=request)
@@ -411,6 +579,139 @@ def test_yahoo_normalization_rejects_error_and_empty_payloads() -> None:
         _CHECK.fail("Expected MarketDataProviderError")
 
 
+def test_twelve_data_client_normalizes_time_series_payload() -> None:
+    payload = {
+        "meta": {"symbol": "aapl", "interval": "1day", "type": "Common Stock"},
+        "values": [
+            {
+                "datetime": "2026-05-01",
+                "open": "100.0",
+                "high": "105.0",
+                "low": "99.0",
+                "close": "103.0",
+                "volume": "1234",
+            }
+        ],
+        "status": "ok",
+    }
+    request = TwelveDataTimeSeriesRequest(
+        symbol="aapl",
+        interval="1day",
+        outputsize=10,
+        start_date=None,
+        end_date=None,
+        exchange=None,
+        asset_type="stock",
+        prepost=False,
+        api_key="test-key",
+    )
+
+    result = TwelveDataMarketDataClient()._normalize(request=request, data=payload)
+
+    _CHECK.assertEqual(result.provider, "twelve-data")
+    _CHECK.assertEqual(result.symbol, "AAPL")
+    _CHECK.assertEqual(result.interval, "1day")
+    _CHECK.assertEqual(result.candles[0].timestamp, datetime(2026, 5, 1, tzinfo=UTC))
+    _CHECK.assertEqual(result.candles[0].close, 103.0)
+
+
+def test_twelve_data_fetch_time_series_uses_params_and_normalizes_response() -> None:
+    payload = {
+        "meta": {"symbol": "QQQ", "interval": "1day", "type": "ETF"},
+        "values": [
+            {
+                "datetime": "2026-05-01 15:59:00",
+                "open": "1",
+                "high": "2",
+                "low": "0.5",
+                "close": "1.5",
+                "volume": "10",
+            }
+        ],
+        "status": "ok",
+    }
+    client = StubTwelveDataMarketDataClient(payload)
+    request = TwelveDataTimeSeriesRequest(
+        symbol="qqq",
+        interval="1day",
+        outputsize=10,
+        start_date="2026-01-01",
+        end_date="2026-02-01",
+        exchange="NASDAQ",
+        asset_type="etf",
+        prepost=True,
+        api_key="secret-key",
+    )
+
+    response = client.fetch_time_series(request, timeout=5.0)
+
+    _CHECK.assertEqual(client.seen_params["symbol"], "QQQ")
+    _CHECK.assertEqual(client.seen_params["outputsize"], 10)
+    _CHECK.assertEqual(client.seen_params["start_date"], "2026-01-01")
+    _CHECK.assertEqual(client.seen_params["end_date"], "2026-02-01")
+    _CHECK.assertEqual(client.seen_params["exchange"], "NASDAQ")
+    _CHECK.assertEqual(client.seen_params["type"], "ETF")
+    _CHECK.assertEqual(client.seen_params["prepost"], True)
+    _CHECK.assertEqual(client.seen_params["apikey"], "secret-key")
+    _CHECK.assertEqual(client.seen_timeout, 5.0)
+    _CHECK.assertEqual(response.candles[0].close, 1.5)
+
+
+def test_twelve_data_client_rejects_error_and_malformed_payloads() -> None:
+    client = TwelveDataMarketDataClient()
+    request = TwelveDataTimeSeriesRequest(
+        "AAPL", "1day", 10, None, None, None, "stock", False, "test-key"
+    )
+
+    try:
+        client._normalize(
+            request=request,
+            data={"status": "error", "message": "Invalid API key", "code": 401},
+        )
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 422)
+        _CHECK.assertEqual(exc.message, "Invalid API key")
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+    try:
+        client._normalize(request=request, data={"status": "ok", "values": []})
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 404)
+        _CHECK.assertEqual(exc.message, "Twelve Data returned no candles")
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+    try:
+        client._normalize_row(
+            {
+                "datetime": "2026-05-01",
+                "open": "bad",
+                "high": "2",
+                "low": "0.5",
+                "close": "1.5",
+                "volume": "10",
+            }
+        )
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 502)
+        _CHECK.assertEqual(
+            exc.message, "Twelve Data returned malformed time series data"
+        )
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+    try:
+        client._normalize_row(["not", "a", "mapping"])
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 502)
+        _CHECK.assertEqual(
+            exc.message, "Twelve Data returned malformed time series data"
+        )
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+
 def test_provider_http_error_mapping() -> None:
     try:
         YahooFinanceClient()._raise_http_error(_http_status_error(429))
@@ -433,6 +734,24 @@ def test_provider_http_error_mapping() -> None:
     except MarketDataProviderError as exc:
         _CHECK.assertEqual(exc.status_code, 429)
         _CHECK.assertEqual(exc.message, "Binance rate limit exceeded")
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+    try:
+        TwelveDataMarketDataClient()._raise_http_error(_http_status_error(400))
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 422)
+        _CHECK.assertEqual(
+            exc.message, "Invalid Twelve Data symbol, API key, or parameters"
+        )
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+    try:
+        TwelveDataMarketDataClient()._raise_http_error(_http_status_error(429))
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 429)
+        _CHECK.assertEqual(exc.message, "Twelve Data rate limit exceeded")
     else:
         _CHECK.fail("Expected MarketDataProviderError")
 

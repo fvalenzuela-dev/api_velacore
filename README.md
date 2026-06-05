@@ -60,6 +60,54 @@ Use an explicit host or port when needed:
 uvicorn api_velacore.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+## Docker
+
+Build the runtime image:
+
+```bash
+docker build -t api-velacore:local .
+```
+
+Run the API container locally with the tracked sample environment:
+
+```bash
+docker run --rm \
+  --name api-velacore \
+  --env-file example.env \
+  -p 8000:8000 \
+  api-velacore:local
+```
+
+For real credentials, copy `example.env` to the ignored `.env` file and edit
+that local file instead of committing secrets:
+
+```bash
+cp example.env .env
+```
+
+Or use Docker Compose, which loads `example.env` and then optional local `.env`
+overrides:
+
+```bash
+docker compose up --build
+```
+
+Verify the container health endpoint:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+Publish the image to a registry by tagging and pushing it:
+
+```bash
+docker tag api-velacore:local <registry>/<image>:<tag>
+docker push <registry>/<image>:<tag>
+```
+
+The repository also includes GCP deployment workflows that build from
+`Dockerfile` on `develop` and `main` pushes.
+
 ## Build and Compile Checks
 
 Python projects are not compiled into a single binary by default. In this

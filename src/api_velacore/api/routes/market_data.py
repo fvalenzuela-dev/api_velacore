@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Path, Query, status
 from api_velacore.infrastructure.market_data import MarketDataProviderError
 from api_velacore.schemas.market_data import MarketDataResponse
 from api_velacore.services.market_data import (
+    TwelveDataMarketDataOptions,
     get_binance_market_data,
     get_twelve_data_market_data,
     get_yahoo_market_data,
@@ -99,14 +100,16 @@ def get_twelve_data_market_data_endpoint(
 ) -> MarketDataResponse:
     try:
         return get_twelve_data_market_data(
-            symbol=symbol,
-            interval=interval,
-            outputsize=outputsize,
-            start_date=start_date,
-            end_date=end_date,
-            exchange=exchange,
-            asset_type=asset_type,
-            prepost=prepost,
+            options=TwelveDataMarketDataOptions(
+                symbol=symbol,
+                interval=interval,
+                outputsize=outputsize,
+                start_date=start_date,
+                end_date=end_date,
+                exchange=exchange,
+                asset_type=asset_type,
+                prepost=prepost,
+            ),
         )
     except MarketDataProviderError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc

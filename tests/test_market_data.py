@@ -25,12 +25,33 @@ from api_velacore.infrastructure.market_data import (
 from api_velacore.main import app
 from api_velacore.schemas.market_data import MarketDataCandle, MarketDataResponse
 from api_velacore.services.market_data import (
+    TwelveDataMarketDataOptions,
     get_binance_market_data,
     get_twelve_data_market_data,
     get_yahoo_market_data,
 )
 
 _CHECK = unittest.TestCase()
+
+
+def _twelve_data_options(
+    *,
+    interval: str = "1day",
+    outputsize: int = 10,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    asset_type: str | None = "stock",
+) -> TwelveDataMarketDataOptions:
+    return TwelveDataMarketDataOptions(
+        symbol="AAPL",
+        interval=interval,
+        outputsize=outputsize,
+        start_date=start_date,
+        end_date=end_date,
+        exchange=None,
+        asset_type=asset_type,
+        prepost=False,
+    )
 
 
 def _sample_response(
@@ -109,10 +130,13 @@ def test_twelve_data_endpoint_returns_normalized_market_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_get_twelve_data_market_data(**kwargs: object) -> MarketDataResponse:
-        _CHECK.assertEqual(kwargs["symbol"], "QQQ")
-        _CHECK.assertEqual(kwargs["interval"], "1day")
-        _CHECK.assertEqual(kwargs["outputsize"], 10)
-        _CHECK.assertEqual(kwargs["asset_type"], "etf")
+        options = kwargs["options"]
+        _CHECK.assertIsInstance(options, TwelveDataMarketDataOptions)
+        assert isinstance(options, TwelveDataMarketDataOptions)
+        _CHECK.assertEqual(options.symbol, "QQQ")
+        _CHECK.assertEqual(options.interval, "1day")
+        _CHECK.assertEqual(options.outputsize, 10)
+        _CHECK.assertEqual(options.asset_type, "etf")
         return _sample_response("twelve-data", "QQQ")
 
     monkeypatch.setattr(
@@ -189,17 +213,10 @@ def test_binance_service_validates_limit() -> None:
         _CHECK.fail("Expected MarketDataProviderError")
 
 
-def test_twelve_data_service_validates_request() -> None:
+def test_twelve_data_service_rejects_unsupported_interval() -> None:
     try:
         get_twelve_data_market_data(
-            symbol="AAPL",
-            interval="1d",
-            outputsize=10,
-            start_date=None,
-            end_date=None,
-            exchange=None,
-            asset_type="stock",
-            prepost=False,
+            options=_twelve_data_options(interval="1d"),
             api_key="test-key",
             client=TwelveDataMarketDataClient(),
         )
@@ -209,16 +226,11 @@ def test_twelve_data_service_validates_request() -> None:
     else:
         _CHECK.fail("Expected MarketDataProviderError")
 
+
+def test_twelve_data_service_rejects_invalid_outputsize() -> None:
     try:
         get_twelve_data_market_data(
-            symbol="AAPL",
-            interval="1day",
-            outputsize=5001,
-            start_date=None,
-            end_date=None,
-            exchange=None,
-            asset_type="stock",
-            prepost=False,
+            options=_twelve_data_options(outputsize=5001),
             api_key="test-key",
             client=TwelveDataMarketDataClient(),
         )
@@ -230,16 +242,11 @@ def test_twelve_data_service_validates_request() -> None:
     else:
         _CHECK.fail("Expected MarketDataProviderError")
 
+
+def test_twelve_data_service_requires_start_and_end_dates_together() -> None:
     try:
         get_twelve_data_market_data(
-            symbol="AAPL",
-            interval="1day",
-            outputsize=10,
-            start_date="2026-01-01",
-            end_date=None,
-            exchange=None,
-            asset_type="stock",
-            prepost=False,
+            options=_twelve_data_options(start_date="2026-01-01"),
             api_key="test-key",
             client=TwelveDataMarketDataClient(),
         )
@@ -252,16 +259,11 @@ def test_twelve_data_service_validates_request() -> None:
     else:
         _CHECK.fail("Expected MarketDataProviderError")
 
+
+def test_twelve_data_service_rejects_unsupported_asset_type() -> None:
     try:
         get_twelve_data_market_data(
-            symbol="AAPL",
-            interval="1day",
-            outputsize=10,
-            start_date=None,
-            end_date=None,
-            exchange=None,
-            asset_type="fund",
-            prepost=False,
+            options=_twelve_data_options(asset_type="fund"),
             api_key="test-key",
             client=TwelveDataMarketDataClient(),
         )
@@ -288,14 +290,7 @@ def test_twelve_data_service_requires_api_key(
 def _assert_twelve_data_service_requires_api_key() -> None:
     try:
         get_twelve_data_market_data(
-            symbol="AAPL",
-            interval="1day",
-            outputsize=10,
-            start_date=None,
-            end_date=None,
-            exchange=None,
-            asset_type="stock",
-            prepost=False,
+            options=_twelve_data_options(),
             api_key=None,
             client=TwelveDataMarketDataClient(),
         )

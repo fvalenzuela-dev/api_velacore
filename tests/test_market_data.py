@@ -2,7 +2,7 @@ import unittest
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import httpx
 import pytest
@@ -132,11 +132,11 @@ def test_twelve_data_endpoint_returns_normalized_market_data(
     def fake_get_twelve_data_market_data(**kwargs: object) -> MarketDataResponse:
         options = kwargs["options"]
         _CHECK.assertIsInstance(options, TwelveDataMarketDataOptions)
-        assert isinstance(options, TwelveDataMarketDataOptions)
-        _CHECK.assertEqual(options.symbol, "QQQ")
-        _CHECK.assertEqual(options.interval, "1day")
-        _CHECK.assertEqual(options.outputsize, 10)
-        _CHECK.assertEqual(options.asset_type, "etf")
+        typed_options = cast(TwelveDataMarketDataOptions, options)
+        _CHECK.assertEqual(typed_options.symbol, "QQQ")
+        _CHECK.assertEqual(typed_options.interval, "1day")
+        _CHECK.assertEqual(typed_options.outputsize, 10)
+        _CHECK.assertEqual(typed_options.asset_type, "etf")
         return _sample_response("twelve-data", "QQQ")
 
     monkeypatch.setattr(

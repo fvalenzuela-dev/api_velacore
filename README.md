@@ -131,6 +131,7 @@ mypy
 |--------|------|---------|
 | `GET` | `/health` | Returns service health status. |
 | `GET` | `/market-data/yahoo/{symbol}` | Returns normalized Yahoo Finance OHLCV candles for stocks and ETFs. |
+| `GET` | `/market-data/twelve-data/{symbol}` | Returns normalized Twelve Data OHLCV candles for stocks and ETFs. |
 | `GET` | `/market-data/binance/{symbol}` | Returns normalized Binance Spot OHLCV candles for crypto pairs. |
 | `GET` | `/openapi.json` | Returns the OpenAPI schema. |
 
@@ -161,6 +162,24 @@ Supported Yahoo query parameters:
 | `start` / `end` | Explicit ISO date range | Use instead of `period`; both are required together. |
 | `prepost` | Include pre/post-market data | Boolean, default `false`. |
 | `events` | Yahoo corporate events filter | For example `div\|split\|earn`. |
+
+Twelve Data market data example:
+
+```bash
+VELACORE_TWELVE_DATA_API_KEY="your-api-key" uvicorn api_velacore.main:app --reload
+curl "http://127.0.0.1:8000/market-data/twelve-data/QQQ?interval=1day&outputsize=100&asset_type=etf"
+```
+
+Supported Twelve Data query parameters:
+
+| Parameter | Purpose | Values / notes |
+|-----------|---------|----------------|
+| `interval` | Candle interval | `1min`, `5min`, `15min`, `30min`, `45min`, `1h`, `2h`, `4h`, `1day`, `1week`, `1month` |
+| `outputsize` | Maximum candles | Default `500`, maximum `5000`. |
+| `start_date` / `end_date` | Explicit date range | Use together; forwarded to Twelve Data. |
+| `exchange` | Exchange filter | Example: `NASDAQ`. |
+| `asset_type` | Provider instrument selector | `stock` maps to `Common Stock`; `etf` maps to `ETF`. |
+| `prepost` | Include pre/post-market data | Boolean, default `false`; requires a supported Twelve Data plan. |
 
 Binance market data example:
 
@@ -216,19 +235,33 @@ The OpenAPI title comes from `VELACORE_APP_NAME` or the default
 
 ## Configuration
 
-Runtime settings live in `src/api_velacore/core/config.py` and use the
-`VELACORE_` environment variable prefix.
+Runtime settings live in `src/api_velacore/core/config.py`, use the
+`VELACORE_` environment variable prefix, and are loaded from environment
+variables plus a local `.env` file in the current working directory.
 
 | Setting | Environment variable | Default |
 |---------|----------------------|---------|
 | `app_name` | `VELACORE_APP_NAME` | `api_velacore` |
 | `app_version` | `VELACORE_APP_VERSION` | `0.1.0` |
+| `twelve_data_api_key` | `VELACORE_TWELVE_DATA_API_KEY` | `None` |
 
-Example:
+Environment variable example:
 
 ```bash
 VELACORE_APP_NAME="Velacore API" uvicorn api_velacore.main:app --reload
 ```
+
+Local `.env` example:
+
+```bash
+cat > .env <<'EOF'
+VELACORE_TWELVE_DATA_API_KEY=your-api-key
+EOF
+
+.venv/bin/python -m uvicorn api_velacore.main:app --reload --port 8766
+```
+
+The `.env` file is ignored by Git; do not commit real provider API keys.
 
 ## Architecture Overview
 

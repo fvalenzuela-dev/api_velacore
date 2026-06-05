@@ -50,6 +50,28 @@ YAHOO_PERIODS = frozenset(
     {"1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"}
 )
 
+TWELVE_DATA_INTERVALS = frozenset(
+    {
+        "1min",
+        "5min",
+        "15min",
+        "30min",
+        "45min",
+        "1h",
+        "2h",
+        "4h",
+        "1day",
+        "1week",
+        "1month",
+    }
+)
+
+TWELVE_DATA_ASSET_TYPES = frozenset({"stock", "etf"})
+TWELVE_DATA_TYPE_BY_ASSET = {
+    "stock": "Common Stock",
+    "etf": "ETF",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class YahooChartRequest:
@@ -70,6 +92,19 @@ class BinanceKlineRequest:
     end_time: int | None
     time_zone: str | None
     limit: int
+
+
+@dataclass(frozen=True, slots=True)
+class TwelveDataTimeSeriesRequest:
+    symbol: str
+    interval: str
+    outputsize: int
+    start_date: str | None
+    end_date: str | None
+    exchange: str | None
+    asset_type: str | None
+    prepost: bool
+    api_key: str
 
 
 class MarketDataProviderError(Exception):
@@ -97,6 +132,22 @@ def _datetime_from_milliseconds(value: int) -> datetime:
 
 def _datetime_from_seconds(value: int) -> datetime:
     return datetime.fromtimestamp(value, tz=UTC)
+
+
+def _parse_twelve_data_datetime(value: object) -> datetime:
+    if not isinstance(value, str):
+        raise MarketDataProviderError(
+            "Twelve Data returned malformed time series data", 502
+        )
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise MarketDataProviderError(
+            "Twelve Data returned malformed time series data", 502
+        ) from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _float_or_none(value: object) -> float | None:
@@ -349,4 +400,126 @@ class BinanceMarketDataClient:
         except (TypeError, ValueError) as exc:
             raise MarketDataProviderError(
                 "Binance returned malformed kline data", 502
+            ) from exc
+
+
+class TwelveDataMarketDataClient:
+    base_url = "https://api.twelvedata.com"
+
+    def fetch_time_series(
+        self,
+        request: TwelveDataTimeSeriesRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> MarketDataResponse:
+        params = self._build_params(request)
+        data = self._get_json(params=params, timeout=timeout)
+        return self._normalize(request=request, data=data)
+
+    def _build_params(
+        self,
+        request: TwelveDataTimeSeriesRequest,
+    ) -> dict[str, str | int | bool]:
+        params: dict[str, str | int | bool] = {
+            "symbol": request.symbol.upper(),
+            "interval": request.interval,
+            "outputsize": request.outputsize,
+            "prepost": request.prepost,
+            "apikey": request.api_key,
+        }
+        optional_params = {
+            "start_date": request.start_date,
+            "end_date": request.end_date,
+            "exchange": request.exchange,
+            "type": self._provider_type(request.asset_type),
+        }
+        for key, value in optional_params.items():
+            if value is not None:
+                params[key] = value
+        return params
+
+    def _provider_type(self, asset_type: str | None) -> str | None:
+        if asset_type is None:
+            return None
+        return TWELVE_DATA_TYPE_BY_ASSET[asset_type]
+
+    def _get_json(
+        self,
+        *,
+        params: Mapping[str, str | int | bool],
+        timeout: float,
+    ) -> dict[str, Any]:
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                response = client.get(f"{self.base_url}/time_series", params=params)
+                response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            message = "Twelve Data request timed out"
+            raise MarketDataProviderError(message, 504) from exc
+        except httpx.HTTPStatusError as exc:
+            self._raise_http_error(exc)
+        except httpx.HTTPError as exc:
+            raise MarketDataProviderError("Twelve Data request failed", 502) from exc
+        return cast(dict[str, Any], response.json())
+
+    def _raise_http_error(self, exc: httpx.HTTPStatusError) -> NoReturn:
+        if exc.response.status_code == 429:
+            raise MarketDataProviderError(
+                "Twelve Data rate limit exceeded", 429
+            ) from exc
+        if exc.response.status_code in {400, 401, 403, 404}:
+            raise MarketDataProviderError(
+                "Invalid Twelve Data symbol, API key, or parameters", 422
+            ) from exc
+        raise MarketDataProviderError("Twelve Data request failed", 502) from exc
+
+    def _normalize(
+        self,
+        *,
+        request: TwelveDataTimeSeriesRequest,
+        data: Mapping[str, Any],
+    ) -> MarketDataResponse:
+        self._raise_api_error(data)
+        meta = cast(Mapping[str, Any], data.get("meta", {}))
+        values = cast(list[Any], data.get("values") or [])
+        if not values:
+            raise MarketDataProviderError("Twelve Data returned no candles", 404)
+        symbol = str(meta.get("symbol", request.symbol)).upper()
+        interval = str(meta.get("interval", request.interval))
+        return MarketDataResponse(
+            provider="twelve-data",
+            symbol=symbol,
+            interval=interval,
+            candles=[self._normalize_row(row) for row in values],
+        )
+
+    def _raise_api_error(self, data: Mapping[str, Any]) -> None:
+        if data.get("status") != "error":
+            return
+        message = str(data.get("message", "Twelve Data request failed"))
+        code_value = data.get("code", 0)
+        try:
+            code = int(cast(int | str, code_value) or 0)
+        except (TypeError, ValueError):
+            code = 0
+        status_code = 429 if code == 429 else 422
+        raise MarketDataProviderError(message, status_code)
+
+    def _normalize_row(self, row: Any) -> MarketDataCandle:
+        if not isinstance(row, Mapping):
+            raise MarketDataProviderError(
+                "Twelve Data returned malformed time series data", 502
+            )
+        try:
+            return MarketDataCandle(
+                timestamp=_parse_twelve_data_datetime(row.get("datetime")),
+                open=float(cast(str | int | float, row.get("open"))),
+                high=float(cast(str | int | float, row.get("high"))),
+                low=float(cast(str | int | float, row.get("low"))),
+                close=float(cast(str | int | float, row.get("close"))),
+                volume=float(cast(str | int | float, row.get("volume"))),
+            )
+        except (TypeError, ValueError) as exc:
+            raise MarketDataProviderError(
+                "Twelve Data returned malformed time series data", 502
             ) from exc

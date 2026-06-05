@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-MarketDataProvider = Literal["yahoo", "binance"]
+MarketDataProvider = Literal["yahoo", "binance", "twelve-data"]
 
 
 class MarketDataCandle(BaseModel):

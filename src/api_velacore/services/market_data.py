@@ -1,10 +1,17 @@
+from dataclasses import dataclass
+
+from api_velacore.core.config import get_settings
 from api_velacore.infrastructure.market_data import (
     BINANCE_INTERVALS,
+    TWELVE_DATA_ASSET_TYPES,
+    TWELVE_DATA_INTERVALS,
     YAHOO_INTERVALS,
     YAHOO_PERIODS,
     BinanceKlineRequest,
     BinanceMarketDataClient,
     MarketDataProviderError,
+    TwelveDataMarketDataClient,
+    TwelveDataTimeSeriesRequest,
     YahooChartRequest,
     YahooFinanceClient,
 )
@@ -68,3 +75,71 @@ def get_binance_market_data(
         limit=limit,
     )
     return binance_client.fetch_klines(request)
+
+
+@dataclass(frozen=True)
+class TwelveDataMarketDataOptions:
+    symbol: str
+    interval: str
+    outputsize: int
+    start_date: str | None
+    end_date: str | None
+    exchange: str | None
+    asset_type: str | None
+    prepost: bool
+
+
+def get_twelve_data_market_data(
+    *,
+    options: TwelveDataMarketDataOptions,
+    api_key: str | None = None,
+    client: TwelveDataMarketDataClient | None = None,
+) -> MarketDataResponse:
+    _validate_twelve_data_options(options)
+    resolved_api_key = _resolve_twelve_data_api_key(api_key)
+    request = _build_twelve_data_request(options, resolved_api_key)
+    twelve_data_client = client or TwelveDataMarketDataClient()
+    return twelve_data_client.fetch_time_series(request)
+
+
+def _validate_twelve_data_options(options: TwelveDataMarketDataOptions) -> None:
+    if options.interval not in TWELVE_DATA_INTERVALS:
+        raise MarketDataProviderError("Unsupported Twelve Data interval", 422)
+    if options.outputsize < 1 or options.outputsize > 5000:
+        raise MarketDataProviderError(
+            "Twelve Data outputsize must be between 1 and 5000", 422
+        )
+    if (options.start_date is None) != (options.end_date is None):
+        raise MarketDataProviderError(
+            "Both start_date and end_date are required when using explicit dates",
+            422,
+        )
+    if (
+        options.asset_type is not None
+        and options.asset_type not in TWELVE_DATA_ASSET_TYPES
+    ):
+        raise MarketDataProviderError("Unsupported Twelve Data asset_type", 422)
+
+
+def _resolve_twelve_data_api_key(api_key: str | None) -> str:
+    resolved_api_key = api_key or get_settings().twelve_data_api_key
+    if not resolved_api_key:
+        raise MarketDataProviderError("Twelve Data API key is not configured", 503)
+    return resolved_api_key
+
+
+def _build_twelve_data_request(
+    options: TwelveDataMarketDataOptions,
+    api_key: str,
+) -> TwelveDataTimeSeriesRequest:
+    return TwelveDataTimeSeriesRequest(
+        symbol=options.symbol,
+        interval=options.interval,
+        outputsize=options.outputsize,
+        start_date=options.start_date,
+        end_date=options.end_date,
+        exchange=options.exchange,
+        asset_type=options.asset_type,
+        prepost=options.prepost,
+        api_key=api_key,
+    )

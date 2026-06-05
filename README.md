@@ -74,7 +74,7 @@ Run the API container locally with the tracked sample environment:
 docker run --rm \
   --name api-velacore \
   --env-file example.env \
-  -p 8000:8000 \
+  -p 8091:8000 \
   api-velacore:local
 ```
 
@@ -92,10 +92,10 @@ overrides:
 docker compose up --build
 ```
 
-Verify the container health endpoint:
+Verify the container health endpoint on port `8091`:
 
 ```bash
-curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8091/health
 ```
 
 Publish the image to a registry by tagging and pushing it:

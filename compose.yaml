@@ -9,7 +9,7 @@ services:
       - path: .env
         required: false
     ports:
-      - "${PORT:-8000}:8000"
+      - "${HOST_PORT:-8091}:8000"
     healthcheck:
       test:
         - CMD

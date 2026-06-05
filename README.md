@@ -133,6 +133,7 @@ mypy
 | `GET` | `/market-data/yahoo/{symbol}` | Returns normalized Yahoo Finance OHLCV candles for stocks and ETFs. |
 | `GET` | `/market-data/twelve-data/{symbol}` | Returns normalized Twelve Data OHLCV candles for stocks and ETFs. |
 | `GET` | `/market-data/binance/{symbol}` | Returns normalized Binance Spot OHLCV candles for crypto pairs. |
+| `GET` | `/indicators/ema/{symbol}` | Returns chart-ready EMA points derived from source candle closes. |
 | `GET` | `/openapi.json` | Returns the OpenAPI schema. |
 
 Health check:
@@ -198,6 +199,30 @@ Supported Binance query parameters:
 
 Market data responses are normalized and stateless; the backend does not persist
 candles in the database or local storage.
+
+EMA indicator example:
+
+```bash
+curl "http://127.0.0.1:8000/indicators/ema/AAPL?period=20&asset_type=equity&range=1mo&interval=1d"
+```
+
+Supported EMA query parameters:
+
+| Parameter | Purpose | Values / notes |
+|-----------|---------|----------------|
+| `period` | EMA length | Default `20`; must be greater than `0`. |
+| `asset_type` | Source asset selector | Optional: `equity`, `etf`, or `crypto`; omitted/equity/etf routes through Yahoo, crypto routes through Binance. |
+| `range` | Source market-data range | Default `1mo`; forwarded where supported. |
+| `interval` | Source candle interval | Default `1d`; crypto-compatible aliases are mapped to Binance intervals. |
+
+EMA responses are stateless and omit warm-up candles; the first returned point is
+the seed EMA at the `period`th candle.
+
+```json
+[
+  {"time":"2026-01-01T00:00:00Z","value":123.45}
+]
+```
 
 Example response shape:
 

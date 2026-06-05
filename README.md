@@ -175,14 +175,18 @@ mypy
 
 ## API Endpoints
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/health` | Returns service health status. |
-| `GET` | `/market-data/yahoo/{symbol}` | Returns normalized Yahoo Finance OHLCV candles for stocks and ETFs. |
-| `GET` | `/market-data/twelve-data/{symbol}` | Returns normalized Twelve Data OHLCV candles for stocks and ETFs. |
-| `GET` | `/market-data/binance/{symbol}` | Returns normalized Binance Spot OHLCV candles for crypto pairs. |
-| `GET` | `/indicators/ema/{symbol}` | Returns chart-ready EMA points derived from source candle closes. |
-| `GET` | `/openapi.json` | Returns the OpenAPI schema. |
+| Group | Method | Path | Purpose |
+|-------|--------|------|---------|
+| Health | `GET` | `/health` | Returns service health status. |
+| Binance | `GET` | `/market-data/binance/{symbol}` | Returns normalized Binance Spot OHLCV candles for crypto pairs. |
+| Yahoo | `GET` | `/market-data/yahoo/{symbol}` | Returns normalized Yahoo Finance OHLCV candles for stocks and ETFs. |
+| Yahoo | `GET` | `/indicators/ema/{symbol}` | Returns Yahoo-backed chart-ready EMA points derived from source candle closes. |
+| Twelve Data | `GET` | `/market-data/twelve-data/{symbol}` | Returns normalized Twelve Data OHLCV candles for stocks and ETFs. |
+| OpenAPI | `GET` | `/openapi.json` | Returns the OpenAPI schema. |
+
+Swagger groups provider-backed endpoints under `binance`, `yahoo`, and
+`twelve-data`. The EMA endpoint appears in the `yahoo` group because its default
+source data comes from Yahoo market data.
 
 Health check:
 

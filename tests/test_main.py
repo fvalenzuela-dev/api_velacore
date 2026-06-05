@@ -24,5 +24,26 @@ def test_create_app_uses_configured_metadata(monkeypatch: pytest.MonkeyPatch) ->
         _CHECK.assertIn("/health", route_paths)
         _CHECK.assertIn("/market-data/yahoo/{symbol}", route_paths)
         _CHECK.assertIn("/market-data/binance/{symbol}", route_paths)
+        openapi = app.openapi()
+        _CHECK.assertEqual(
+            [tag["name"] for tag in openapi["tags"]],
+            ["binance", "yahoo", "twelve-data"],
+        )
+        _CHECK.assertEqual(
+            openapi["paths"]["/market-data/yahoo/{symbol}"]["get"]["tags"],
+            ["yahoo"],
+        )
+        _CHECK.assertEqual(
+            openapi["paths"]["/indicators/ema/{symbol}"]["get"]["tags"],
+            ["yahoo"],
+        )
+        _CHECK.assertEqual(
+            openapi["paths"]["/market-data/binance/{symbol}"]["get"]["tags"],
+            ["binance"],
+        )
+        _CHECK.assertEqual(
+            openapi["paths"]["/market-data/twelve-data/{symbol}"]["get"]["tags"],
+            ["twelve-data"],
+        )
     finally:
         get_settings.cache_clear()

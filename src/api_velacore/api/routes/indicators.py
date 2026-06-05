@@ -6,14 +6,15 @@ from api_velacore.infrastructure.market_data import MarketDataProviderError
 from api_velacore.schemas.indicators import IndicatorAssetType, IndicatorPoint
 from api_velacore.services.indicators import EmaIndicatorOptions, get_ema_indicator
 
-router = APIRouter(prefix="/indicators", tags=["indicators"])
+router = APIRouter(prefix="/indicators")
 
 
 @router.get(
     "/ema/{symbol}",
     response_model=list[IndicatorPoint],
     status_code=status.HTTP_200_OK,
-    summary="Calculate EMA indicator points for chart overlays",
+    summary="Calculate Yahoo-backed EMA indicator points for chart overlays",
+    tags=["yahoo"],
 )
 def get_ema_indicator_endpoint(
     symbol: Annotated[str, Path(min_length=1, description="Market symbol")],

@@ -16,6 +16,39 @@ from api_velacore.services.indicators import (
 
 router = APIRouter(prefix="/indicators", tags=["indicators"])
 
+type SymbolPath = Annotated[str, Path(min_length=1, description="Market symbol")]
+type ProviderQuery = Annotated[
+    IndicatorProvider,
+    Query(description="Source market-data provider: yahoo, binance, or twelve-data"),
+]
+type PeriodQuery = Annotated[
+    int,
+    Query(ge=1, le=5000, description="EMA length; defaults to 20"),
+]
+type RangeQuery = Annotated[
+    str | None,
+    Query(
+        alias="range",
+        description="Yahoo source range where supported, for example 1mo",
+    ),
+]
+type IntervalQuery = Annotated[
+    str,
+    Query(description="Source candle interval, for example 1d, 1h, or 5m"),
+]
+type OutputSizeQuery = Annotated[
+    int,
+    Query(ge=1, le=5000, description="Twelve Data source candle count"),
+]
+type LimitQuery = Annotated[
+    int | None,
+    Query(ge=1, le=1000, description="Binance source candle count"),
+]
+type AssetTypeQuery = Annotated[
+    TwelveDataIndicatorAssetType | None,
+    Query(description="Optional Twelve Data asset selector: stock or etf"),
+]
+
 
 @router.get(
     "/ema/{symbol}",
@@ -24,40 +57,14 @@ router = APIRouter(prefix="/indicators", tags=["indicators"])
     summary="Calculate EMA indicator points for chart overlays",
 )
 def get_ema_indicator_endpoint(
-    symbol: Annotated[str, Path(min_length=1, description="Market symbol")],
-    provider: Annotated[
-        IndicatorProvider,
-        Query(
-            description="Source market-data provider: yahoo, binance, or twelve-data"
-        ),
-    ] = "yahoo",
-    period: Annotated[
-        int,
-        Query(ge=1, le=5000, description="EMA length; defaults to 20"),
-    ] = 20,
-    range_: Annotated[
-        str | None,
-        Query(
-            alias="range",
-            description="Yahoo source range where supported, for example 1mo",
-        ),
-    ] = "1mo",
-    interval: Annotated[
-        str,
-        Query(description="Source candle interval, for example 1d, 1h, or 5m"),
-    ] = "1d",
-    outputsize: Annotated[
-        int,
-        Query(ge=1, le=5000, description="Twelve Data source candle count"),
-    ] = 500,
-    limit: Annotated[
-        int | None,
-        Query(ge=1, le=1000, description="Binance source candle count"),
-    ] = None,
-    asset_type: Annotated[
-        TwelveDataIndicatorAssetType | None,
-        Query(description="Optional Twelve Data asset selector: stock or etf"),
-    ] = None,
+    symbol: SymbolPath,
+    provider: ProviderQuery = "yahoo",
+    period: PeriodQuery = 20,
+    range_: RangeQuery = "1mo",
+    interval: IntervalQuery = "1d",
+    outputsize: OutputSizeQuery = 500,
+    limit: LimitQuery = None,
+    asset_type: AssetTypeQuery = None,
 ) -> list[IndicatorPoint]:
     try:
         return get_ema_indicator(

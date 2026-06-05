@@ -3,17 +3,19 @@ FROM python:3.14.5-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app/src \
     PORT=8000
 
 WORKDIR /app
 
 RUN groupadd --system app && useradd --system --gid app --home /app app
 
-COPY pyproject.toml README.md ./
-COPY src ./src
+COPY requirements.txt ./
 
-RUN python -m pip install --upgrade pip \
-    && python -m pip install .
+RUN python -m pip install --upgrade pip==26.1.2 \
+    && python -m pip install --requirement requirements.txt
+
+COPY src ./src
 
 USER app
 

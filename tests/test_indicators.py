@@ -16,6 +16,7 @@ from api_velacore.services.indicators import (
     calculate_ema_points,
     get_ema_indicator,
 )
+from api_velacore.services.market_data import TwelveDataMarketDataOptions
 
 _CHECK = unittest.TestCase()
 
@@ -32,16 +33,22 @@ def _candle(day: int, close: float) -> MarketDataCandle:
     )
 
 
+def _sample_candles() -> list[MarketDataCandle]:
+    return [_candle(1, 10.0), _candle(2, 11.0), _candle(3, 12.0)]
+
+
 def test_ema_endpoint_returns_chart_ready_points(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_get_ema_indicator(**kwargs: object) -> list[IndicatorPoint]:
         options = cast(EmaIndicatorOptions, kwargs["options"])
         _CHECK.assertEqual(options.symbol, "AAPL")
+        _CHECK.assertEqual(options.provider, "yahoo")
         _CHECK.assertEqual(options.period, 3)
-        _CHECK.assertEqual(options.asset_type, "equity")
         _CHECK.assertEqual(options.range, "1mo")
         _CHECK.assertEqual(options.interval, "1d")
+        _CHECK.assertEqual(options.outputsize, 500)
+        _CHECK.assertEqual(options.limit, 500)
         return [
             IndicatorPoint(
                 time=datetime(2026, 1, 3, tzinfo=UTC),
@@ -57,7 +64,7 @@ def test_ema_endpoint_returns_chart_ready_points(
     client = TestClient(app)
 
     response = client.get(
-        "/indicators/ema/AAPL?period=3&asset_type=equity&range=1mo&interval=1d"
+        "/indicators/ema/AAPL?provider=yahoo&period=3&range=1mo&interval=1d"
     )
 
     _CHECK.assertEqual(response.status_code, 200)
@@ -67,13 +74,13 @@ def test_ema_endpoint_returns_chart_ready_points(
     )
 
 
-def test_ema_endpoint_uses_default_period_and_asset_routing(
+def test_ema_endpoint_uses_default_yahoo_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_get_ema_indicator(**kwargs: object) -> list[IndicatorPoint]:
         options = cast(EmaIndicatorOptions, kwargs["options"])
+        _CHECK.assertEqual(options.provider, "yahoo")
         _CHECK.assertEqual(options.period, 20)
-        _CHECK.assertIsNone(options.asset_type)
         _CHECK.assertEqual(options.range, "1mo")
         _CHECK.assertEqual(options.interval, "1d")
         return [
@@ -99,10 +106,47 @@ def test_ema_endpoint_uses_default_period_and_asset_routing(
     )
 
 
-def test_ema_endpoint_rejects_invalid_asset_type() -> None:
+def test_ema_endpoint_accepts_binance_provider_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_ema_indicator(**kwargs: object) -> list[IndicatorPoint]:
+        options = cast(EmaIndicatorOptions, kwargs["options"])
+        _CHECK.assertEqual(options.provider, "binance")
+        _CHECK.assertEqual(options.limit, 100)
+        return [IndicatorPoint(time=datetime(2026, 1, 3, tzinfo=UTC), value=11.0)]
+
+    monkeypatch.setattr(indicator_routes, "get_ema_indicator", fake_get_ema_indicator)
     client = TestClient(app)
 
-    response = client.get("/indicators/ema/AAPL?asset_type=forex")
+    response = client.get("/indicators/ema/BTCUSDT?provider=binance&period=3&limit=100")
+
+    _CHECK.assertEqual(response.status_code, 200)
+
+
+def test_ema_endpoint_accepts_twelve_data_provider_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_ema_indicator(**kwargs: object) -> list[IndicatorPoint]:
+        options = cast(EmaIndicatorOptions, kwargs["options"])
+        _CHECK.assertEqual(options.provider, "twelve-data")
+        _CHECK.assertEqual(options.outputsize, 100)
+        _CHECK.assertEqual(options.asset_type, "etf")
+        return [IndicatorPoint(time=datetime(2026, 1, 3, tzinfo=UTC), value=11.0)]
+
+    monkeypatch.setattr(indicator_routes, "get_ema_indicator", fake_get_ema_indicator)
+    client = TestClient(app)
+
+    response = client.get(
+        "/indicators/ema/QQQ?provider=twelve-data&period=3&outputsize=100&asset_type=etf"
+    )
+
+    _CHECK.assertEqual(response.status_code, 200)
+
+
+def test_ema_endpoint_rejects_invalid_provider() -> None:
+    client = TestClient(app)
+
+    response = client.get("/indicators/ema/AAPL?provider=forex")
 
     _CHECK.assertEqual(response.status_code, 422)
 
@@ -180,7 +224,7 @@ def test_calculate_ema_points_rejects_insufficient_data() -> None:
     _CHECK.assertEqual(exc_info.value.message, "Not enough candles to calculate EMA")
 
 
-def test_ema_service_routes_equity_to_yahoo_market_data(
+def test_ema_service_routes_yahoo_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_get_yahoo_market_data(**kwargs: object) -> MarketDataResponse:
@@ -192,7 +236,7 @@ def test_ema_service_routes_equity_to_yahoo_market_data(
             symbol="AAPL",
             interval="1d",
             range="1mo",
-            candles=[_candle(1, 10.0), _candle(2, 11.0), _candle(3, 12.0)],
+            candles=_sample_candles(),
         )
 
     monkeypatch.setattr(
@@ -205,9 +249,12 @@ def test_ema_service_routes_equity_to_yahoo_market_data(
         options=EmaIndicatorOptions(
             symbol="AAPL",
             period=3,
-            asset_type="equity",
+            provider="yahoo",
             range="1mo",
             interval="1d",
+            outputsize=500,
+            limit=500,
+            asset_type=None,
         )
     )
 
@@ -216,54 +263,18 @@ def test_ema_service_routes_equity_to_yahoo_market_data(
     )
 
 
-def test_ema_service_routes_etf_to_yahoo_market_data(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fake_get_yahoo_market_data(**kwargs: object) -> MarketDataResponse:
-        _CHECK.assertEqual(kwargs["symbol"], "QQQ")
-        _CHECK.assertEqual(kwargs["period"], "3mo")
-        _CHECK.assertEqual(kwargs["interval"], "1d")
-        return MarketDataResponse(
-            provider="yahoo",
-            symbol="QQQ",
-            interval="1d",
-            range="3mo",
-            candles=[_candle(1, 10.0), _candle(2, 11.0), _candle(3, 12.0)],
-        )
-
-    monkeypatch.setattr(
-        indicator_services,
-        "get_yahoo_market_data",
-        fake_get_yahoo_market_data,
-    )
-
-    points = get_ema_indicator(
-        options=EmaIndicatorOptions(
-            symbol="QQQ",
-            period=3,
-            asset_type="etf",
-            range="3mo",
-            interval="1d",
-        )
-    )
-
-    _CHECK.assertEqual(
-        points, [IndicatorPoint(time=_candle(3, 12.0).timestamp, value=11.0)]
-    )
-
-
-def test_ema_service_routes_crypto_to_binance_market_data(
+def test_ema_service_routes_binance_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_get_binance_market_data(**kwargs: object) -> MarketDataResponse:
         _CHECK.assertEqual(kwargs["symbol"], "BTCUSDT")
         _CHECK.assertEqual(kwargs["interval"], "1d")
-        _CHECK.assertEqual(kwargs["limit"], 500)
+        _CHECK.assertEqual(kwargs["limit"], 100)
         return MarketDataResponse(
             provider="binance",
             symbol="BTCUSDT",
             interval="1d",
-            candles=[_candle(1, 10.0), _candle(2, 11.0), _candle(3, 12.0)],
+            candles=_sample_candles(),
         )
 
     monkeypatch.setattr(
@@ -276,14 +287,101 @@ def test_ema_service_routes_crypto_to_binance_market_data(
         options=EmaIndicatorOptions(
             symbol="BTCUSDT",
             period=3,
-            asset_type="crypto",
+            provider="binance",
             range="1mo",
             interval="1d",
+            outputsize=500,
+            limit=100,
+            asset_type=None,
         )
     )
 
     _CHECK.assertEqual(
         points, [IndicatorPoint(time=_candle(3, 12.0).timestamp, value=11.0)]
+    )
+
+
+def test_ema_service_routes_twelve_data_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_twelve_data_market_data(**kwargs: object) -> MarketDataResponse:
+        options = cast(TwelveDataMarketDataOptions, kwargs["options"])
+        _CHECK.assertEqual(options.symbol, "QQQ")
+        _CHECK.assertEqual(options.interval, "1day")
+        _CHECK.assertEqual(options.outputsize, 100)
+        _CHECK.assertEqual(options.asset_type, "etf")
+        return MarketDataResponse(
+            provider="twelve-data",
+            symbol="QQQ",
+            interval="1day",
+            candles=_sample_candles(),
+        )
+
+    monkeypatch.setattr(
+        indicator_services,
+        "get_twelve_data_market_data",
+        fake_get_twelve_data_market_data,
+    )
+
+    points = get_ema_indicator(
+        options=EmaIndicatorOptions(
+            symbol="QQQ",
+            period=3,
+            provider="twelve-data",
+            range="1mo",
+            interval="1d",
+            outputsize=100,
+            limit=500,
+            asset_type="etf",
+        )
+    )
+
+    _CHECK.assertEqual(
+        points, [IndicatorPoint(time=_candle(3, 12.0).timestamp, value=11.0)]
+    )
+
+
+def test_ema_service_rejects_binance_period_larger_than_limit() -> None:
+    with pytest.raises(MarketDataProviderError) as exc_info:
+        get_ema_indicator(
+            options=EmaIndicatorOptions(
+                symbol="BTCUSDT",
+                period=1001,
+                provider="binance",
+                range="1mo",
+                interval="1d",
+                outputsize=500,
+                limit=1000,
+                asset_type=None,
+            )
+        )
+
+    _CHECK.assertEqual(exc_info.value.status_code, 422)
+    _CHECK.assertEqual(
+        exc_info.value.message,
+        "Binance source limit must be greater than or equal to EMA period",
+    )
+
+
+def test_ema_service_rejects_twelve_data_period_larger_than_outputsize() -> None:
+    with pytest.raises(MarketDataProviderError) as exc_info:
+        get_ema_indicator(
+            options=EmaIndicatorOptions(
+                symbol="QQQ",
+                period=501,
+                provider="twelve-data",
+                range="1mo",
+                interval="1d",
+                outputsize=500,
+                limit=500,
+                asset_type="etf",
+            )
+        )
+
+    _CHECK.assertEqual(exc_info.value.status_code, 422)
+    _CHECK.assertEqual(
+        exc_info.value.message,
+        "Twelve Data outputsize must be greater than or equal to EMA period",
     )
 
 
@@ -304,9 +402,12 @@ def test_ema_service_preserves_provider_failures(
             options=EmaIndicatorOptions(
                 symbol="AAPL",
                 period=3,
-                asset_type="equity",
+                provider="yahoo",
                 range="1mo",
                 interval="1d",
+                outputsize=500,
+                limit=500,
+                asset_type=None,
             )
         )
 

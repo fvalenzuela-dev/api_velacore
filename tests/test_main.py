@@ -27,7 +27,7 @@ def test_create_app_uses_configured_metadata(monkeypatch: pytest.MonkeyPatch) ->
         openapi = app.openapi()
         _CHECK.assertEqual(
             [tag["name"] for tag in openapi["tags"]],
-            ["binance", "yahoo", "twelve-data"],
+            ["binance", "yahoo", "twelve-data", "indicators"],
         )
         _CHECK.assertEqual(
             openapi["paths"]["/market-data/yahoo/{symbol}"]["get"]["tags"],
@@ -35,7 +35,7 @@ def test_create_app_uses_configured_metadata(monkeypatch: pytest.MonkeyPatch) ->
         )
         _CHECK.assertEqual(
             openapi["paths"]["/indicators/ema/{symbol}"]["get"]["tags"],
-            ["yahoo"],
+            ["indicators"],
         )
         _CHECK.assertEqual(
             openapi["paths"]["/market-data/binance/{symbol}"]["get"]["tags"],

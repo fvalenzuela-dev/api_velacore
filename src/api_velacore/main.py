@@ -7,8 +7,9 @@ from api_velacore.core.config import get_settings
 
 _OPENAPI_TAGS = [
     {"name": "binance", "description": "Binance Spot market data."},
-    {"name": "yahoo", "description": "Yahoo-backed market data and indicators."},
+    {"name": "yahoo", "description": "Yahoo Finance market data."},
     {"name": "twelve-data", "description": "Twelve Data market data."},
+    {"name": "indicators", "description": "Technical indicators by provider."},
 ]
 
 

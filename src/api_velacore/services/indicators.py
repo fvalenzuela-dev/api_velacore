@@ -1,15 +1,21 @@
 from dataclasses import dataclass
 
 from api_velacore.infrastructure.market_data import MarketDataProviderError
-from api_velacore.schemas.indicators import IndicatorAssetType, IndicatorPoint
+from api_velacore.schemas.indicators import (
+    IndicatorPoint,
+    IndicatorProvider,
+    TwelveDataIndicatorAssetType,
+)
 from api_velacore.schemas.market_data import MarketDataCandle, MarketDataResponse
 from api_velacore.services.market_data import (
+    TwelveDataMarketDataOptions,
     get_binance_market_data,
+    get_twelve_data_market_data,
     get_yahoo_market_data,
 )
 
 _DEFAULT_SOURCE_CANDLE_LIMIT = 500
-_BINANCE_INTERVAL_BY_YAHOO_INTERVAL = {
+_BINANCE_INTERVAL_BY_COMMON_INTERVAL = {
     "1m": "1m",
     "5m": "5m",
     "15m": "15m",
@@ -19,15 +25,28 @@ _BINANCE_INTERVAL_BY_YAHOO_INTERVAL = {
     "1wk": "1w",
     "1mo": "1M",
 }
+_TWELVE_DATA_INTERVAL_BY_COMMON_INTERVAL = {
+    "1m": "1min",
+    "5m": "5min",
+    "15m": "15min",
+    "30m": "30min",
+    "1h": "1h",
+    "1d": "1day",
+    "1wk": "1week",
+    "1mo": "1month",
+}
 
 
 @dataclass(frozen=True)
 class EmaIndicatorOptions:
     symbol: str
     period: int
-    asset_type: IndicatorAssetType | None
+    provider: IndicatorProvider
     range: str | None
     interval: str
+    outputsize: int
+    limit: int
+    asset_type: TwelveDataIndicatorAssetType | None
 
 
 def get_ema_indicator(*, options: EmaIndicatorOptions) -> list[IndicatorPoint]:
@@ -70,14 +89,38 @@ def _fetch_source_candles(options: EmaIndicatorOptions) -> list[MarketDataCandle
 
 
 def _fetch_source_market_data(options: EmaIndicatorOptions) -> MarketDataResponse:
-    if options.asset_type == "crypto":
+    if options.provider == "binance":
+        if options.period > options.limit:
+            raise MarketDataProviderError(
+                "Binance source limit must be greater than or equal to EMA period",
+                422,
+            )
         return get_binance_market_data(
             symbol=options.symbol,
             interval=_binance_interval(options.interval),
             start_time=None,
             end_time=None,
             time_zone=None,
-            limit=_crypto_source_limit(options.period),
+            limit=options.limit,
+        )
+
+    if options.provider == "twelve-data":
+        if options.period > options.outputsize:
+            raise MarketDataProviderError(
+                "Twelve Data outputsize must be greater than or equal to EMA period",
+                422,
+            )
+        return get_twelve_data_market_data(
+            options=TwelveDataMarketDataOptions(
+                symbol=options.symbol,
+                interval=_twelve_data_interval(options.interval),
+                outputsize=options.outputsize,
+                start_date=None,
+                end_date=None,
+                exchange=None,
+                asset_type=options.asset_type,
+                prepost=False,
+            ),
         )
 
     return get_yahoo_market_data(
@@ -92,8 +135,12 @@ def _fetch_source_market_data(options: EmaIndicatorOptions) -> MarketDataRespons
 
 
 def _binance_interval(interval: str) -> str:
-    return _BINANCE_INTERVAL_BY_YAHOO_INTERVAL.get(interval, interval)
+    return _BINANCE_INTERVAL_BY_COMMON_INTERVAL.get(interval, interval)
 
 
-def _crypto_source_limit(period: int) -> int:
+def _twelve_data_interval(interval: str) -> str:
+    return _TWELVE_DATA_INTERVAL_BY_COMMON_INTERVAL.get(interval, interval)
+
+
+def default_source_limit(period: int) -> int:
     return min(max(period * 3, _DEFAULT_SOURCE_CANDLE_LIMIT), 1000)

@@ -180,13 +180,13 @@ mypy
 | Health | `GET` | `/health` | Returns service health status. |
 | Binance | `GET` | `/market-data/binance/{symbol}` | Returns normalized Binance Spot OHLCV candles for crypto pairs. |
 | Yahoo | `GET` | `/market-data/yahoo/{symbol}` | Returns normalized Yahoo Finance OHLCV candles for stocks and ETFs. |
-| Yahoo | `GET` | `/indicators/ema/{symbol}` | Returns Yahoo-backed chart-ready EMA points derived from source candle closes. |
+| Indicators | `GET` | `/indicators/ema/{symbol}` | Returns chart-ready EMA points derived from selected provider source candle closes. |
 | Twelve Data | `GET` | `/market-data/twelve-data/{symbol}` | Returns normalized Twelve Data OHLCV candles for stocks and ETFs. |
 | OpenAPI | `GET` | `/openapi.json` | Returns the OpenAPI schema. |
 
 Swagger groups provider-backed endpoints under `binance`, `yahoo`, and
-`twelve-data`. The EMA endpoint appears in the `yahoo` group because its default
-source data comes from Yahoo market data.
+`twelve-data`. Technical indicators appear under `indicators` and select their
+source with a `provider` query parameter.
 
 Health check:
 
@@ -252,23 +252,33 @@ Supported Binance query parameters:
 Market data responses are normalized and stateless; the backend does not persist
 candles in the database or local storage.
 
-EMA indicator example:
+EMA indicator examples:
 
 ```bash
-curl "http://127.0.0.1:8000/indicators/ema/AAPL?period=20&asset_type=equity&range=1mo&interval=1d"
+curl "http://127.0.0.1:8000/indicators/ema/AAPL?provider=yahoo&period=20&range=1mo&interval=1d"
+curl "http://127.0.0.1:8000/indicators/ema/BTCUSDT?provider=binance&period=20&interval=1d&limit=500"
+curl "http://127.0.0.1:8000/indicators/ema/QQQ?provider=twelve-data&period=20&interval=1d&outputsize=500&asset_type=etf"
 ```
 
 Supported EMA query parameters:
 
 | Parameter | Purpose | Values / notes |
 |-----------|---------|----------------|
+| `provider` | Source market-data provider | Default `yahoo`; allowed values: `yahoo`, `binance`, `twelve-data`. |
 | `period` | EMA length | Default `20`; must be greater than `0`. |
-| `asset_type` | Source asset selector | Optional: `equity`, `etf`, or `crypto`; omitted/equity/etf routes through Yahoo, crypto routes through Binance. |
-| `range` | Source market-data range | Default `1mo`; forwarded where supported. |
-| `interval` | Source candle interval | Default `1d`; crypto-compatible aliases are mapped to Binance intervals. |
+| `range` | Yahoo source market-data range | Default `1mo`; used by Yahoo where supported. |
+| `interval` | Source candle interval | Default `1d`; common aliases map to Binance and Twelve Data intervals where needed. |
+| `limit` | Binance candle count | Default derives from `period`; maximum `1000`; must be greater than or equal to `period`. |
+| `outputsize` | Twelve Data candle count | Default `500`; maximum `5000`; must be greater than or equal to `period`. |
+| `asset_type` | Twelve Data instrument selector | Optional: `stock` or `etf`. |
 
-EMA responses are stateless and omit warm-up candles; the first returned point is
-the seed EMA at the `period`th candle.
+Provider-specific parameters that do not apply to the selected provider are
+ignored. Twelve Data EMA requires `VELACORE_TWELVE_DATA_API_KEY` to be
+configured.
+
+EMA responses are stateless and omit warm-up candles; a shared calculation uses
+normalized candle `close` prices from the selected provider. The first returned
+point is the seed EMA at the `period`th candle.
 
 ```json
 [

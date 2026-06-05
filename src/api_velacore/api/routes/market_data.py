@@ -11,7 +11,7 @@ from api_velacore.services.market_data import (
     get_yahoo_market_data,
 )
 
-router = APIRouter(prefix="/market-data", tags=["market-data"])
+router = APIRouter(prefix="/market-data")
 
 
 @router.get(
@@ -19,6 +19,7 @@ router = APIRouter(prefix="/market-data", tags=["market-data"])
     response_model=MarketDataResponse,
     status_code=status.HTTP_200_OK,
     summary="Fetch Yahoo Finance market data",
+    tags=["yahoo"],
 )
 def get_yahoo_market_data_endpoint(
     symbol: Annotated[str, Path(min_length=1, description="Yahoo ticker symbol")],
@@ -66,6 +67,7 @@ def get_yahoo_market_data_endpoint(
     response_model=MarketDataResponse,
     status_code=status.HTTP_200_OK,
     summary="Fetch Twelve Data market data for stocks and ETFs",
+    tags=["twelve-data"],
 )
 def get_twelve_data_market_data_endpoint(
     symbol: Annotated[str, Path(min_length=1, description="Stock or ETF symbol")],
@@ -120,6 +122,7 @@ def get_twelve_data_market_data_endpoint(
     response_model=MarketDataResponse,
     status_code=status.HTTP_200_OK,
     summary="Fetch Binance Spot market data",
+    tags=["binance"],
 )
 def get_binance_market_data_endpoint(
     symbol: Annotated[str, Path(min_length=1, description="Binance Spot symbol")],

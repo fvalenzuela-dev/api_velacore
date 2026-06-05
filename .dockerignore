@@ -1,0 +1,34 @@
+# Git and local editor state
+.git
+.gitignore
+.github
+.atl
+.pi
+.pi-lens
+.DS_Store
+
+# Python caches and tooling
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+coverage
+htmlcov
+
+# Virtual environments
+.venv
+venv
+
+# Build artifacts
+build
+dist
+*.egg-info
+
+# Local environment and secrets
+.env
+.env.*
+
+# Tests and local docs not needed at runtime
+tests

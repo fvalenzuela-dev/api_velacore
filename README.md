@@ -60,6 +60,54 @@ Use an explicit host or port when needed:
 uvicorn api_velacore.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+## Docker
+
+Build the runtime image:
+
+```bash
+docker build -t api-velacore:local .
+```
+
+Run the API container locally with the tracked sample environment:
+
+```bash
+docker run --rm \
+  --name api-velacore \
+  --env-file example.env \
+  -p 8091:8000 \
+  api-velacore:local
+```
+
+For real credentials, copy `example.env` to the ignored `.env` file and edit
+that local file instead of committing secrets:
+
+```bash
+cp example.env .env
+```
+
+Or use Docker Compose, which loads `example.env` and then optional local `.env`
+overrides:
+
+```bash
+docker compose up --build
+```
+
+Verify the container health endpoint on port `8091`:
+
+```bash
+curl http://127.0.0.1:8091/health
+```
+
+Publish the image to a registry by tagging and pushing it:
+
+```bash
+docker tag api-velacore:local <registry>/<image>:<tag>
+docker push <registry>/<image>:<tag>
+```
+
+The repository also includes GCP deployment workflows that build from
+`Dockerfile` on `develop` and `main` pushes.
+
 ## Build and Compile Checks
 
 Python projects are not compiled into a single binary by default. In this
@@ -127,13 +175,18 @@ mypy
 
 ## API Endpoints
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/health` | Returns service health status. |
-| `GET` | `/market-data/yahoo/{symbol}` | Returns normalized Yahoo Finance OHLCV candles for stocks and ETFs. |
-| `GET` | `/market-data/twelve-data/{symbol}` | Returns normalized Twelve Data OHLCV candles for stocks and ETFs. |
-| `GET` | `/market-data/binance/{symbol}` | Returns normalized Binance Spot OHLCV candles for crypto pairs. |
-| `GET` | `/openapi.json` | Returns the OpenAPI schema. |
+| Group | Method | Path | Purpose |
+|-------|--------|------|---------|
+| Health | `GET` | `/health` | Returns service health status. |
+| Binance | `GET` | `/market-data/binance/{symbol}` | Returns normalized Binance Spot OHLCV candles for crypto pairs. |
+| Yahoo | `GET` | `/market-data/yahoo/{symbol}` | Returns normalized Yahoo Finance OHLCV candles for stocks and ETFs. |
+| Indicators | `GET` | `/indicators/ema/{symbol}` | Returns chart-ready EMA points derived from selected provider source candle closes. |
+| Twelve Data | `GET` | `/market-data/twelve-data/{symbol}` | Returns normalized Twelve Data OHLCV candles for stocks and ETFs. |
+| OpenAPI | `GET` | `/openapi.json` | Returns the OpenAPI schema. |
+
+Swagger groups provider-backed endpoints under `binance`, `yahoo`, and
+`twelve-data`. Technical indicators appear under `indicators` and select their
+source with a `provider` query parameter.
 
 Health check:
 
@@ -198,6 +251,40 @@ Supported Binance query parameters:
 
 Market data responses are normalized and stateless; the backend does not persist
 candles in the database or local storage.
+
+EMA indicator examples:
+
+```bash
+curl "http://127.0.0.1:8000/indicators/ema/AAPL?provider=yahoo&period=20&range=1mo&interval=1d"
+curl "http://127.0.0.1:8000/indicators/ema/BTCUSDT?provider=binance&period=20&interval=1d&limit=500"
+curl "http://127.0.0.1:8000/indicators/ema/QQQ?provider=twelve-data&period=20&interval=1d&outputsize=500&asset_type=etf"
+```
+
+Supported EMA query parameters:
+
+| Parameter | Purpose | Values / notes |
+|-----------|---------|----------------|
+| `provider` | Source market-data provider | Default `yahoo`; allowed values: `yahoo`, `binance`, `twelve-data`. |
+| `period` | EMA length | Default `20`; must be greater than `0`. |
+| `range` | Yahoo source market-data range | Default `1mo`; used by Yahoo where supported. |
+| `interval` | Source candle interval | Default `1d`; common aliases map to Binance and Twelve Data intervals where needed. |
+| `limit` | Binance candle count | Default derives from `period`; maximum `1000`; must be greater than or equal to `period`. |
+| `outputsize` | Twelve Data candle count | Default `500`; maximum `5000`; must be greater than or equal to `period`. |
+| `asset_type` | Twelve Data instrument selector | Optional: `stock` or `etf`. |
+
+Provider-specific parameters that do not apply to the selected provider are
+ignored. Twelve Data EMA requires `VELACORE_TWELVE_DATA_API_KEY` to be
+configured.
+
+EMA responses are stateless and omit warm-up candles; a shared calculation uses
+normalized candle `close` prices from the selected provider. The first returned
+point is the seed EMA at the `period`th candle.
+
+```json
+[
+  {"time":"2026-01-01T00:00:00Z","value":123.45}
+]
+```
 
 Example response shape:
 

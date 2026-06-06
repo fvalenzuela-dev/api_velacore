@@ -142,6 +142,8 @@ def calculate_rsi_points(
 
 
 def _rsi_value(*, average_gain: float, average_loss: float) -> float:
+    if average_gain == 0 and average_loss == 0:
+        return 50.0
     if average_loss == 0:
         return 100.0
     relative_strength = average_gain / average_loss
@@ -159,11 +161,15 @@ def _fetch_source_market_data(
     options: EmaIndicatorOptions | RsiIndicatorOptions,
 ) -> MarketDataResponse:
     indicator_name = "EMA" if isinstance(options, EmaIndicatorOptions) else "RSI"
+    minimum_source_candles = (
+        options.period + 1 if indicator_name == "RSI" else options.period
+    )
+    minimum_suffix = " plus 1" if indicator_name == "RSI" else ""
     if options.provider == "binance":
-        if options.period > options.limit:
+        if minimum_source_candles > options.limit:
             raise MarketDataProviderError(
                 "Binance source limit must be greater than or equal to "
-                f"{indicator_name} period",
+                f"{indicator_name} period{minimum_suffix}",
                 422,
             )
         return get_binance_market_data(
@@ -176,10 +182,10 @@ def _fetch_source_market_data(
         )
 
     if options.provider == "twelve-data":
-        if options.period > options.outputsize:
+        if minimum_source_candles > options.outputsize:
             raise MarketDataProviderError(
                 "Twelve Data outputsize must be greater than or equal to "
-                f"{indicator_name} period",
+                f"{indicator_name} period{minimum_suffix}",
                 422,
             )
         return get_twelve_data_market_data(

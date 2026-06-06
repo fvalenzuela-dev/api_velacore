@@ -231,9 +231,7 @@ def test_rsi_endpoint_accepts_binance_provider_options(
     monkeypatch.setattr(indicator_routes, "get_rsi_indicator", fake_get_rsi_indicator)
     client = TestClient(app)
 
-    response = client.get(
-        "/indicators/rsi/BTCUSDT?provider=binance&period=3&limit=100"
-    )
+    response = client.get("/indicators/rsi/BTCUSDT?provider=binance&period=3&limit=100")
 
     _CHECK.assertEqual(response.status_code, 200)
 
@@ -355,6 +353,19 @@ def test_calculate_rsi_points_sorts_candles_chronologically() -> None:
 
     _CHECK.assertEqual(points[0].time, _candle(4, 46.0).timestamp)
     _CHECK.assertAlmostEqual(points[0].value, 66.66666666666666)
+
+
+def test_calculate_rsi_points_returns_neutral_for_flat_series() -> None:
+    candles = [
+        _candle(1, 10.0),
+        _candle(2, 10.0),
+        _candle(3, 10.0),
+        _candle(4, 10.0),
+    ]
+
+    points = calculate_rsi_points(candles=candles, period=3)
+
+    _CHECK.assertEqual(points[0].value, 50.0)
 
 
 def test_calculate_rsi_points_rejects_insufficient_data() -> None:
@@ -606,7 +617,7 @@ def test_rsi_service_routes_binance_provider(
     def fake_get_binance_market_data(**kwargs: object) -> MarketDataResponse:
         _CHECK.assertEqual(kwargs["symbol"], "BTCUSDT")
         _CHECK.assertEqual(kwargs["interval"], "1d")
-        _CHECK.assertEqual(kwargs["limit"], 100)
+        _CHECK.assertEqual(kwargs["limit"], 4)
         return MarketDataResponse(
             provider="binance",
             symbol="BTCUSDT",
@@ -633,7 +644,7 @@ def test_rsi_service_routes_binance_provider(
             range="1mo",
             interval="1d",
             outputsize=500,
-            limit=100,
+            limit=4,
             asset_type=None,
         )
     )
@@ -650,7 +661,7 @@ def test_rsi_service_routes_twelve_data_provider(
         options = cast(TwelveDataMarketDataOptions, kwargs["options"])
         _CHECK.assertEqual(options.symbol, "QQQ")
         _CHECK.assertEqual(options.interval, "1day")
-        _CHECK.assertEqual(options.outputsize, 100)
+        _CHECK.assertEqual(options.outputsize, 4)
         _CHECK.assertEqual(options.asset_type, "etf")
         return MarketDataResponse(
             provider="twelve-data",
@@ -677,7 +688,7 @@ def test_rsi_service_routes_twelve_data_provider(
             provider="twelve-data",
             range="1mo",
             interval="1d",
-            outputsize=100,
+            outputsize=4,
             limit=500,
             asset_type="etf",
         )
@@ -685,4 +696,48 @@ def test_rsi_service_routes_twelve_data_provider(
 
     _CHECK.assertEqual(
         points, [IndicatorPoint(time=_candle(4, 13.0).timestamp, value=100.0)]
+    )
+
+
+def test_rsi_service_rejects_binance_limit_equal_to_period() -> None:
+    with pytest.raises(MarketDataProviderError) as exc_info:
+        get_rsi_indicator(
+            options=RsiIndicatorOptions(
+                symbol="BTCUSDT",
+                period=3,
+                provider="binance",
+                range="1mo",
+                interval="1d",
+                outputsize=500,
+                limit=3,
+                asset_type=None,
+            )
+        )
+
+    _CHECK.assertEqual(exc_info.value.status_code, 422)
+    _CHECK.assertEqual(
+        exc_info.value.message,
+        "Binance source limit must be greater than or equal to RSI period plus 1",
+    )
+
+
+def test_rsi_service_rejects_twelve_data_outputsize_equal_to_period() -> None:
+    with pytest.raises(MarketDataProviderError) as exc_info:
+        get_rsi_indicator(
+            options=RsiIndicatorOptions(
+                symbol="QQQ",
+                period=3,
+                provider="twelve-data",
+                range="1mo",
+                interval="1d",
+                outputsize=3,
+                limit=500,
+                asset_type="etf",
+            )
+        )
+
+    _CHECK.assertEqual(exc_info.value.status_code, 422)
+    _CHECK.assertEqual(
+        exc_info.value.message,
+        "Twelve Data outputsize must be greater than or equal to RSI period plus 1",
     )

@@ -11,21 +11,23 @@ from starlette.routing import Route
 
 import api_velacore.api.routes.market_data as market_data_routes
 from api_velacore.core.config import get_settings
+from api_velacore.infrastructure.errors import MarketDataProviderError
 from api_velacore.infrastructure.market_data import (
-    BinanceExchangeInfoRequest,
-    BinanceKlineRequest,
     BinanceMarketDataClient,
-    MarketDataProviderError,
-    TwelveDataEtfListRequest,
-    TwelveDataForexPairsRequest,
     TwelveDataMarketDataClient,
-    TwelveDataStockListRequest,
-    TwelveDataTimeSeriesRequest,
-    YahooChartRequest,
     YahooFinanceClient,
     _datetime_to_epoch_seconds,
     _float_at,
     _float_or_none,
+)
+from api_velacore.infrastructure.requests import (
+    BinanceExchangeInfoRequest,
+    BinanceKlineRequest,
+    TwelveDataEtfListRequest,
+    TwelveDataForexPairsRequest,
+    TwelveDataStockListRequest,
+    TwelveDataTimeSeriesRequest,
+    YahooChartRequest,
 )
 from api_velacore.main import app
 from api_velacore.schemas.market_data import (

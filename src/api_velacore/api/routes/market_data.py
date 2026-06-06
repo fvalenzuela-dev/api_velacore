@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
 
-from api_velacore.infrastructure.market_data import MarketDataProviderError
+from api_velacore.infrastructure.errors import MarketDataProviderError
 from api_velacore.schemas.market_data import (
     BinanceExchangeInfoResponse,
     MarketDataResponse,

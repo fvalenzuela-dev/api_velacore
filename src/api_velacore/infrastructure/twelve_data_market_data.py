@@ -12,6 +12,8 @@ from api_velacore.schemas.market_data import (
     TwelveDataForexPairsResponse,
     TwelveDataStock,
     TwelveDataStocksResponse,
+    TwelveDataSymbolSearchResponse,
+    TwelveDataSymbolSearchResult,
 )
 
 from .constants import TWELVE_DATA_TYPE_BY_ASSET
@@ -25,6 +27,7 @@ from .requests import (
     TwelveDataEtfListRequest,
     TwelveDataForexPairsRequest,
     TwelveDataStockListRequest,
+    TwelveDataSymbolSearchRequest,
     TwelveDataTimeSeriesRequest,
 )
 
@@ -71,6 +74,20 @@ class TwelveDataMarketDataClient:
         params = self._build_etf_list_params(request)
         data = self._get_json_from_path("/etf", params=params, timeout=timeout)
         return self._normalize_etfs(data)
+
+    def fetch_symbol_search(
+        self,
+        request: TwelveDataSymbolSearchRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> TwelveDataSymbolSearchResponse:
+        params = self._build_symbol_search_params(request)
+        data = self._get_json_from_path(
+            "/symbol_search",
+            params=params,
+            timeout=timeout,
+        )
+        return self._normalize_symbol_search(data)
 
     def _build_params(
         self,
@@ -155,6 +172,15 @@ class TwelveDataMarketDataClient:
                 "mic_code": request.mic_code,
             },
         )
+
+    def _build_symbol_search_params(
+        self,
+        request: TwelveDataSymbolSearchRequest,
+    ) -> dict[str, str]:
+        return {
+            "symbol": request.symbol,
+            "apikey": request.api_key,
+        }
 
     def _with_optional_params(
         self,
@@ -265,6 +291,15 @@ class TwelveDataMarketDataClient:
         rows = self._extract_listing_rows(data)
         return TwelveDataEtfsResponse(etfs=[self._normalize_etf(row) for row in rows])
 
+    def _normalize_symbol_search(
+        self,
+        data: Mapping[str, Any],
+    ) -> TwelveDataSymbolSearchResponse:
+        rows = self._extract_listing_rows(data)
+        return TwelveDataSymbolSearchResponse(
+            symbols=[self._normalize_symbol_search_result(row) for row in rows]
+        )
+
     def _extract_listing_rows(self, data: Mapping[str, Any]) -> list[Any]:
         self._raise_api_error(data)
         rows = data.get("data")
@@ -320,6 +355,26 @@ class TwelveDataMarketDataClient:
             cfi_code=_string_or_none(typed_row.get("cfi_code")),
             isin=_string_or_none(typed_row.get("isin")),
             cusip=_string_or_none(typed_row.get("cusip")),
+        )
+
+    def _normalize_symbol_search_result(
+        self,
+        row: object,
+    ) -> TwelveDataSymbolSearchResult:
+        typed_row = self._typed_listing_row(row)
+        return TwelveDataSymbolSearchResult(
+            symbol=_required_string(
+                typed_row,
+                "symbol",
+                provider_message="Twelve Data returned malformed listing data",
+            ),
+            name=_string_or_none(typed_row.get("name")),
+            instrument_name=_string_or_none(typed_row.get("instrument_name")),
+            exchange=_string_or_none(typed_row.get("exchange")),
+            mic_code=_string_or_none(typed_row.get("mic_code")),
+            country=_string_or_none(typed_row.get("country")),
+            currency=_string_or_none(typed_row.get("currency")),
+            type=_string_or_none(typed_row.get("type")),
         )
 
     def _typed_listing_row(self, row: object) -> Mapping[str, Any]:

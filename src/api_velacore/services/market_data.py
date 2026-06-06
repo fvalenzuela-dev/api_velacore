@@ -17,18 +17,22 @@ from api_velacore.infrastructure.market_data import (
 from api_velacore.infrastructure.requests import (
     BinanceExchangeInfoRequest,
     BinanceKlineRequest,
+    BinanceSymbolSearchRequest,
     TwelveDataEtfListRequest,
     TwelveDataForexPairsRequest,
     TwelveDataStockListRequest,
+    TwelveDataSymbolSearchRequest,
     TwelveDataTimeSeriesRequest,
     YahooChartRequest,
 )
 from api_velacore.schemas.market_data import (
     BinanceExchangeInfoResponse,
+    BinanceSymbolSearchResponse,
     MarketDataResponse,
     TwelveDataEtfsResponse,
     TwelveDataForexPairsResponse,
     TwelveDataStocksResponse,
+    TwelveDataSymbolSearchResponse,
 )
 
 
@@ -123,6 +127,37 @@ def get_binance_exchange_info(
     return binance_client.fetch_exchange_info(request)
 
 
+@dataclass(frozen=True)
+class BinanceSymbolSearchOptions:
+    q: str
+    permissions: list[str] | None
+    show_permission_sets: bool
+    symbol_status: str | None
+    limit: int | None
+
+
+def get_binance_symbol_search(
+    *,
+    options: BinanceSymbolSearchOptions,
+    client: BinanceMarketDataClient | None = None,
+) -> BinanceSymbolSearchResponse:
+    normalized_query = _required_search_query(options.q, "Binance q is required")
+    if options.limit is not None and options.limit < 1:
+        raise MarketDataProviderError(
+            "Binance symbol search limit must be positive",
+            422,
+        )
+    request = BinanceSymbolSearchRequest(
+        q=normalized_query,
+        permissions=tuple(_optional_strings(options.permissions)),
+        show_permission_sets=options.show_permission_sets,
+        symbol_status=_optional_string(options.symbol_status),
+        limit=options.limit,
+    )
+    binance_client = client or BinanceMarketDataClient()
+    return binance_client.fetch_symbol_search(request)
+
+
 def _validate_binance_exchange_info_filters(
     *,
     symbol: str | None,
@@ -184,6 +219,11 @@ class TwelveDataEtfListOptions:
     exchange: str
     mic_code: str | None
     country: str
+
+
+@dataclass(frozen=True)
+class TwelveDataSymbolSearchOptions:
+    symbol: str
 
 
 def get_twelve_data_market_data(
@@ -254,6 +294,25 @@ def get_twelve_data_etfs(
     return twelve_data_client.fetch_etfs(request)
 
 
+def get_twelve_data_symbol_search(
+    *,
+    options: TwelveDataSymbolSearchOptions,
+    api_key: str | None = None,
+    client: TwelveDataMarketDataClient | None = None,
+) -> TwelveDataSymbolSearchResponse:
+    resolved_symbol = _required_search_query(
+        options.symbol,
+        "Twelve Data symbol search query is required",
+    )
+    resolved_api_key = _resolve_twelve_data_api_key(api_key)
+    request = TwelveDataSymbolSearchRequest(
+        symbol=resolved_symbol,
+        api_key=resolved_api_key,
+    )
+    twelve_data_client = client or TwelveDataMarketDataClient()
+    return twelve_data_client.fetch_symbol_search(request)
+
+
 def _validate_twelve_data_options(options: TwelveDataMarketDataOptions) -> None:
     if options.interval not in TWELVE_DATA_INTERVALS:
         raise MarketDataProviderError("Unsupported Twelve Data interval", 422)
@@ -295,6 +354,13 @@ def _build_twelve_data_request(
         prepost=options.prepost,
         api_key=api_key,
     )
+
+
+def _required_search_query(value: str, message: str) -> str:
+    stripped = value.strip()
+    if not stripped:
+        raise MarketDataProviderError(message, 422)
+    return stripped
 
 
 def _optional_string(value: str | None) -> str | None:

@@ -5,26 +5,49 @@ from fastapi import APIRouter, HTTPException, Path, Query, status
 from api_velacore.infrastructure.errors import MarketDataProviderError
 from api_velacore.schemas.market_data import (
     BinanceExchangeInfoResponse,
+    BinanceSymbolSearchResponse,
     MarketDataResponse,
     TwelveDataEtfsResponse,
     TwelveDataForexPairsResponse,
     TwelveDataStocksResponse,
+    TwelveDataSymbolSearchResponse,
 )
 from api_velacore.services.market_data import (
+    BinanceSymbolSearchOptions,
     TwelveDataEtfListOptions,
     TwelveDataForexPairsOptions,
     TwelveDataMarketDataOptions,
     TwelveDataStockListOptions,
+    TwelveDataSymbolSearchOptions,
     get_binance_exchange_info,
     get_binance_market_data,
+    get_binance_symbol_search,
     get_twelve_data_etfs,
     get_twelve_data_forex_pairs,
     get_twelve_data_market_data,
     get_twelve_data_stocks,
+    get_twelve_data_symbol_search,
     get_yahoo_market_data,
 )
 
 router = APIRouter(prefix="/market-data")
+
+
+def _resolve_symbol_search_query(
+    *,
+    symbol: str | None,
+    q: str | None,
+) -> str:
+    normalized_symbol = symbol.strip() if symbol is not None else None
+    normalized_q = q.strip() if q is not None else None
+    has_symbol = bool(normalized_symbol)
+    has_q = bool(normalized_q)
+    if has_symbol == has_q:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide exactly one of symbol or q",
+        )
+    return str(normalized_symbol) if has_symbol else str(normalized_q)
 
 
 @router.get(
@@ -114,6 +137,55 @@ def get_binance_exchange_info_endpoint(
             permissions=permissions,
             show_permission_sets=show_permission_sets,
             symbol_status=symbol_status,
+        )
+    except MarketDataProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.get(
+    "/binance/symbol-search",
+    response_model=BinanceSymbolSearchResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Search Binance Spot trading symbols",
+    tags=["binance"],
+)
+def get_binance_symbol_search_endpoint(
+    q: Annotated[
+        str,
+        Query(
+            min_length=1,
+            description="Search text matched against symbol, baseAsset, and quoteAsset",
+        ),
+    ],
+    permissions: Annotated[
+        list[str] | None,
+        Query(description="Optional repeated Binance permission filters"),
+    ] = None,
+    show_permission_sets: Annotated[
+        bool,
+        Query(
+            alias="showPermissionSets",
+            description="Include Binance permission set metadata",
+        ),
+    ] = True,
+    symbol_status: Annotated[
+        str | None,
+        Query(alias="symbolStatus", description="Optional Binance symbol status"),
+    ] = "TRADING",
+    limit: Annotated[
+        int | None,
+        Query(ge=1, description="Maximum matching symbols returned"),
+    ] = None,
+) -> BinanceSymbolSearchResponse:
+    try:
+        return get_binance_symbol_search(
+            options=BinanceSymbolSearchOptions(
+                q=q,
+                permissions=permissions,
+                show_permission_sets=show_permission_sets,
+                symbol_status=symbol_status,
+                limit=limit,
+            ),
         )
     except MarketDataProviderError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -232,6 +304,33 @@ def get_twelve_data_etfs_endpoint(
                 exchange=exchange,
                 mic_code=mic_code,
                 country=country,
+            ),
+        )
+    except MarketDataProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.get(
+    "/twelve-data/symbol-search",
+    response_model=TwelveDataSymbolSearchResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Search Twelve Data symbols",
+    tags=["twelve-data"],
+)
+def get_twelve_data_symbol_search_endpoint(
+    symbol: Annotated[
+        str | None,
+        Query(description="Search text for Twelve Data symbol_search"),
+    ] = None,
+    q: Annotated[
+        str | None,
+        Query(description="Alias for symbol search text"),
+    ] = None,
+) -> TwelveDataSymbolSearchResponse:
+    try:
+        return get_twelve_data_symbol_search(
+            options=TwelveDataSymbolSearchOptions(
+                symbol=_resolve_symbol_search_query(symbol=symbol, q=q),
             ),
         )
     except MarketDataProviderError as exc:

@@ -179,12 +179,14 @@ mypy
 |-------|--------|------|---------|
 | Health | `GET` | `/health` | Returns service health status. |
 | Binance | `GET` | `/market-data/binance/exchange-info` | Lists normalized Binance Spot trading symbols/pairs. |
+| Binance | `GET` | `/market-data/binance/symbol-search` | Searches normalized Binance Spot symbols/pairs for autocomplete. |
 | Binance | `GET` | `/market-data/binance/{symbol}` | Returns normalized Binance Spot OHLCV candles for crypto pairs. |
 | Yahoo | `GET` | `/market-data/yahoo/{symbol}` | Returns normalized Yahoo Finance OHLCV candles for stocks and ETFs. |
 | Indicators | `GET` | `/indicators/ema/{symbol}` | Returns chart-ready EMA points derived from selected provider source candle closes. |
 | Twelve Data | `GET` | `/market-data/twelve-data/stocks` | Lists normalized Twelve Data stock assets. |
 | Twelve Data | `GET` | `/market-data/twelve-data/forex-pairs` | Lists normalized Twelve Data Forex pairs. |
 | Twelve Data | `GET` | `/market-data/twelve-data/etfs` | Lists normalized Twelve Data ETF assets. |
+| Twelve Data | `GET` | `/market-data/twelve-data/symbol-search` | Searches normalized Twelve Data symbols for autocomplete. |
 | Twelve Data | `GET` | `/market-data/twelve-data/{symbol}` | Returns normalized Twelve Data OHLCV candles for stocks and ETFs. |
 | OpenAPI | `GET` | `/openapi.json` | Returns the OpenAPI schema. |
 
@@ -257,10 +259,12 @@ Asset listing examples:
 
 ```bash
 curl "http://127.0.0.1:8000/market-data/binance/exchange-info?symbolStatus=TRADING"
+curl "http://127.0.0.1:8000/market-data/binance/symbol-search?q=btc&limit=10"
 VELACORE_TWELVE_DATA_API_KEY="your-api-key" uvicorn api_velacore.main:app --reload
 curl "http://127.0.0.1:8000/market-data/twelve-data/stocks?exchange=NASDAQ&country=United%20States&type=Common%20Stock"
 curl "http://127.0.0.1:8000/market-data/twelve-data/forex-pairs?currency_group=Major"
 curl "http://127.0.0.1:8000/market-data/twelve-data/etfs?exchange=NYSE&country=United%20States"
+curl "http://127.0.0.1:8000/market-data/twelve-data/symbol-search?q=tesla"
 ```
 
 Supported Binance exchange-info listing parameters:
@@ -273,6 +277,16 @@ Supported Binance exchange-info listing parameters:
 | `showPermissionSets` | Include Binance permission set metadata | Boolean, default `false`; enabling it can make the response several MB. |
 | `symbolStatus` | Symbol status filter | Default `TRADING`. |
 
+Supported Binance symbol search parameters:
+
+| Parameter | Purpose | Values / notes |
+|-----------|---------|----------------|
+| `q` | Search text | Required; matched case-insensitively against `symbol`, `baseAsset`, and `quoteAsset`. |
+| `permissions` | Repeated Binance permission filters | Optional; forwarded to Binance before local filtering. |
+| `showPermissionSets` | Include Binance permission set metadata | Boolean, default `true` for symbol search. |
+| `symbolStatus` | Symbol status filter | Default `TRADING`. |
+| `limit` | Maximum returned matches | Optional; applied after backend filtering. |
+
 Supported Twelve Data listing parameters:
 
 | Endpoint | Parameters |
@@ -280,6 +294,7 @@ Supported Twelve Data listing parameters:
 | `/market-data/twelve-data/stocks` | `symbol`, `exchange` default `NASDAQ`, `mic_code`, `country` default `United States`, `type` default `Common Stock`. |
 | `/market-data/twelve-data/forex-pairs` | `symbol`, `currency_base`, `currency_quote`, `currency_group` default `Major`. |
 | `/market-data/twelve-data/etfs` | `symbol`, `exchange` default `NYSE`, `mic_code`, `country` default `United States`. |
+| `/market-data/twelve-data/symbol-search` | Exactly one of `symbol` or `q`; the Twelve Data API key remains server-side. |
 
 Market data responses are normalized and stateless; the backend does not persist
 candles in the database or local storage.

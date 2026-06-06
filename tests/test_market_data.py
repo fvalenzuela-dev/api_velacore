@@ -23,9 +23,11 @@ from api_velacore.infrastructure.market_data import (
 from api_velacore.infrastructure.requests import (
     BinanceExchangeInfoRequest,
     BinanceKlineRequest,
+    BinanceSymbolSearchRequest,
     TwelveDataEtfListRequest,
     TwelveDataForexPairsRequest,
     TwelveDataStockListRequest,
+    TwelveDataSymbolSearchRequest,
     TwelveDataTimeSeriesRequest,
     YahooChartRequest,
 )
@@ -33,6 +35,7 @@ from api_velacore.main import app
 from api_velacore.schemas.market_data import (
     BinanceExchangeInfoResponse,
     BinanceExchangeSymbol,
+    BinanceSymbolSearchResponse,
     MarketDataCandle,
     MarketDataResponse,
     TwelveDataEtf,
@@ -41,18 +44,24 @@ from api_velacore.schemas.market_data import (
     TwelveDataForexPairsResponse,
     TwelveDataStock,
     TwelveDataStocksResponse,
+    TwelveDataSymbolSearchResponse,
+    TwelveDataSymbolSearchResult,
 )
 from api_velacore.services.market_data import (
+    BinanceSymbolSearchOptions,
     TwelveDataEtfListOptions,
     TwelveDataForexPairsOptions,
     TwelveDataMarketDataOptions,
     TwelveDataStockListOptions,
+    TwelveDataSymbolSearchOptions,
     get_binance_exchange_info,
     get_binance_market_data,
+    get_binance_symbol_search,
     get_twelve_data_etfs,
     get_twelve_data_forex_pairs,
     get_twelve_data_market_data,
     get_twelve_data_stocks,
+    get_twelve_data_symbol_search,
     get_yahoo_market_data,
 )
 
@@ -114,6 +123,29 @@ def _sample_binance_exchange_info_response() -> BinanceExchangeInfoResponse:
                 isSpotTradingAllowed=True,
                 isMarginTradingAllowed=False,
                 orderTypes=["LIMIT", "MARKET"],
+            )
+        ]
+    )
+
+
+def _sample_binance_symbol_search_response() -> BinanceSymbolSearchResponse:
+    return BinanceSymbolSearchResponse(
+        symbols=_sample_binance_exchange_info_response().symbols
+    )
+
+
+def _sample_twelve_data_symbol_search_response() -> TwelveDataSymbolSearchResponse:
+    return TwelveDataSymbolSearchResponse(
+        symbols=[
+            TwelveDataSymbolSearchResult(
+                symbol="TSLA",
+                name="Tesla Inc",
+                instrument_name="Tesla Inc",
+                exchange="NASDAQ",
+                mic_code="XNAS",
+                country="United States",
+                currency="USD",
+                type="Common Stock",
             )
         ]
     )
@@ -302,6 +334,44 @@ def test_binance_exchange_info_endpoint_forwards_filters(
     _CHECK.assertEqual(response.status_code, 200)
 
 
+def test_binance_symbol_search_endpoint_forwards_defaults_and_filters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_binance_symbol_search(**kwargs: object) -> BinanceSymbolSearchResponse:
+        options = cast(BinanceSymbolSearchOptions, kwargs["options"])
+        _CHECK.assertEqual(options.q, "bt")
+        _CHECK.assertEqual(options.permissions, ["SPOT"])
+        _CHECK.assertEqual(options.show_permission_sets, True)
+        _CHECK.assertEqual(options.symbol_status, "TRADING")
+        _CHECK.assertEqual(options.limit, 5)
+        return _sample_binance_symbol_search_response()
+
+    monkeypatch.setattr(
+        market_data_routes,
+        "get_binance_symbol_search",
+        fake_get_binance_symbol_search,
+    )
+    client = TestClient(app)
+
+    response = client.get(
+        "/market-data/binance/symbol-search?q=bt&permissions=SPOT&limit=5"
+    )
+
+    _CHECK.assertEqual(response.status_code, 200)
+    body = response.json()
+    _CHECK.assertEqual(body["provider"], "binance")
+    _CHECK.assertEqual(body["symbols"][0]["symbol"], "BTCUSDT")
+    _CHECK.assertEqual(body["symbols"][0]["baseAsset"], "BTC")
+
+
+def test_binance_symbol_search_endpoint_requires_q() -> None:
+    client = TestClient(app)
+
+    response = client.get("/market-data/binance/symbol-search")
+
+    _CHECK.assertEqual(response.status_code, 422)
+
+
 def test_twelve_data_stocks_endpoint_uses_defaults_and_returns_normalized_list(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -386,6 +456,48 @@ def test_twelve_data_etfs_endpoint_uses_defaults_and_returns_normalized_list(
     _CHECK.assertEqual(body["etfs"][0]["figi_code"], "BBG000BDTBL9")
 
 
+def test_twelve_data_symbol_search_endpoint_accepts_q_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_twelve_data_symbol_search(
+        **kwargs: object,
+    ) -> TwelveDataSymbolSearchResponse:
+        options = cast(TwelveDataSymbolSearchOptions, kwargs["options"])
+        _CHECK.assertEqual(options.symbol, "tesla")
+        return _sample_twelve_data_symbol_search_response()
+
+    monkeypatch.setattr(
+        market_data_routes,
+        "get_twelve_data_symbol_search",
+        fake_get_twelve_data_symbol_search,
+    )
+    client = TestClient(app)
+
+    response = client.get("/market-data/twelve-data/symbol-search?q=tesla")
+
+    _CHECK.assertEqual(response.status_code, 200)
+    body = response.json()
+    _CHECK.assertEqual(body["provider"], "twelve-data")
+    _CHECK.assertEqual(body["symbols"][0]["symbol"], "TSLA")
+    _CHECK.assertEqual(body["symbols"][0]["instrument_name"], "Tesla Inc")
+
+
+def test_twelve_data_symbol_search_endpoint_validates_query_choice() -> None:
+    client = TestClient(app)
+
+    missing_response = client.get("/market-data/twelve-data/symbol-search")
+    both_response = client.get(
+        "/market-data/twelve-data/symbol-search?symbol=TSLA&q=tesla"
+    )
+
+    _CHECK.assertEqual(missing_response.status_code, 422)
+    _CHECK.assertEqual(both_response.status_code, 422)
+    _CHECK.assertEqual(
+        both_response.json(),
+        {"detail": "Provide exactly one of symbol or q"},
+    )
+
+
 def test_twelve_data_listing_endpoints_return_missing_api_key_errors(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -399,6 +511,7 @@ def test_twelve_data_listing_endpoints_return_missing_api_key_errors(
             "/market-data/twelve-data/stocks",
             "/market-data/twelve-data/forex-pairs",
             "/market-data/twelve-data/etfs",
+            "/market-data/twelve-data/symbol-search?symbol=TSLA",
         ):
             response = client.get(path)
             _CHECK.assertEqual(response.status_code, 503)
@@ -417,6 +530,10 @@ def test_static_listing_routes_are_not_captured_by_dynamic_symbol_routes() -> No
         paths.index("/market-data/binance/{symbol}"),
     )
     _CHECK.assertLess(
+        paths.index("/market-data/binance/symbol-search"),
+        paths.index("/market-data/binance/{symbol}"),
+    )
+    _CHECK.assertLess(
         paths.index("/market-data/twelve-data/stocks"),
         paths.index("/market-data/twelve-data/{symbol}"),
     )
@@ -426,6 +543,10 @@ def test_static_listing_routes_are_not_captured_by_dynamic_symbol_routes() -> No
     )
     _CHECK.assertLess(
         paths.index("/market-data/twelve-data/etfs"),
+        paths.index("/market-data/twelve-data/{symbol}"),
+    )
+    _CHECK.assertLess(
+        paths.index("/market-data/twelve-data/symbol-search"),
         paths.index("/market-data/twelve-data/{symbol}"),
     )
 
@@ -447,6 +568,38 @@ def test_provider_errors_are_mapped_to_http_errors(
 
     _CHECK.assertEqual(response.status_code, 422)
     _CHECK.assertEqual(response.json(), {"detail": "Unsupported Yahoo interval"})
+
+
+def test_symbol_search_provider_errors_are_mapped_to_http_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_binance_symbol_search(**kwargs: object) -> BinanceSymbolSearchResponse:
+        raise MarketDataProviderError("Binance request failed", 502)
+
+    def fake_get_twelve_data_symbol_search(
+        **kwargs: object,
+    ) -> TwelveDataSymbolSearchResponse:
+        raise MarketDataProviderError("Twelve Data rate limit exceeded", 429)
+
+    monkeypatch.setattr(
+        market_data_routes,
+        "get_binance_symbol_search",
+        fake_get_binance_symbol_search,
+    )
+    monkeypatch.setattr(
+        market_data_routes,
+        "get_twelve_data_symbol_search",
+        fake_get_twelve_data_symbol_search,
+    )
+    client = TestClient(app)
+
+    binance_response = client.get("/market-data/binance/symbol-search?q=btc")
+    twelve_data_response = client.get(
+        "/market-data/twelve-data/symbol-search?symbol=TSLA"
+    )
+
+    _CHECK.assertEqual(binance_response.status_code, 502)
+    _CHECK.assertEqual(twelve_data_response.status_code, 429)
 
 
 def test_yahoo_service_validates_period_and_interval() -> None:
@@ -482,6 +635,44 @@ def test_binance_service_validates_limit() -> None:
     except MarketDataProviderError as exc:
         _CHECK.assertEqual(exc.status_code, 422)
         _CHECK.assertEqual(exc.message, "Binance limit must be between 1 and 1000")
+    else:
+        _CHECK.fail("Expected MarketDataProviderError")
+
+
+def test_binance_symbol_search_service_validates_query_and_limit() -> None:
+    invalid_cases = [
+        (" ", None, "Binance q is required"),
+        ("btc", 0, "Binance symbol search limit must be positive"),
+    ]
+    for q, limit, expected_message in invalid_cases:
+        try:
+            get_binance_symbol_search(
+                options=BinanceSymbolSearchOptions(
+                    q=q,
+                    permissions=None,
+                    show_permission_sets=True,
+                    symbol_status="TRADING",
+                    limit=limit,
+                ),
+                client=BinanceMarketDataClient(),
+            )
+        except MarketDataProviderError as exc:
+            _CHECK.assertEqual(exc.status_code, 422)
+            _CHECK.assertEqual(exc.message, expected_message)
+        else:
+            _CHECK.fail("Expected MarketDataProviderError")
+
+
+def test_twelve_data_symbol_search_service_validates_query() -> None:
+    try:
+        get_twelve_data_symbol_search(
+            options=TwelveDataSymbolSearchOptions(symbol=" "),
+            api_key="test-key",
+            client=TwelveDataMarketDataClient(),
+        )
+    except MarketDataProviderError as exc:
+        _CHECK.assertEqual(exc.status_code, 422)
+        _CHECK.assertEqual(exc.message, "Twelve Data symbol search query is required")
     else:
         _CHECK.fail("Expected MarketDataProviderError")
 
@@ -606,6 +797,11 @@ def _assert_twelve_data_listing_services_require_api_key() -> None:
             api_key=None,
             client=TwelveDataMarketDataClient(),
         ),
+        lambda: get_twelve_data_symbol_search(
+            options=TwelveDataSymbolSearchOptions(symbol="TSLA"),
+            api_key=None,
+            client=TwelveDataMarketDataClient(),
+        ),
     ]
     for service_call in service_calls:
         try:
@@ -669,11 +865,26 @@ class _StubBinanceExchangeInfoClient(BinanceMarketDataClient):
         return _sample_binance_exchange_info_response()
 
 
+class _StubBinanceSymbolSearchClient(BinanceMarketDataClient):
+    def __init__(self) -> None:
+        self.request: BinanceSymbolSearchRequest | None = None
+
+    def fetch_symbol_search(
+        self,
+        request: BinanceSymbolSearchRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> BinanceSymbolSearchResponse:
+        self.request = request
+        return _sample_binance_symbol_search_response()
+
+
 class _StubTwelveDataListingClient(TwelveDataMarketDataClient):
     def __init__(self) -> None:
         self.stock_request: TwelveDataStockListRequest | None = None
         self.forex_request: TwelveDataForexPairsRequest | None = None
         self.etf_request: TwelveDataEtfListRequest | None = None
+        self.symbol_search_request: TwelveDataSymbolSearchRequest | None = None
 
     def fetch_stocks(
         self,
@@ -702,6 +913,15 @@ class _StubTwelveDataListingClient(TwelveDataMarketDataClient):
         self.etf_request = request
         return _sample_twelve_data_etfs_response()
 
+    def fetch_symbol_search(
+        self,
+        request: TwelveDataSymbolSearchRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> TwelveDataSymbolSearchResponse:
+        self.symbol_search_request = request
+        return _sample_twelve_data_symbol_search_response()
+
 
 def test_listing_services_forward_binance_request() -> None:
     binance_client = _StubBinanceExchangeInfoClient()
@@ -719,6 +939,29 @@ def test_listing_services_forward_binance_request() -> None:
     _CHECK.assertEqual(binance_request.permissions, ())
     _CHECK.assertEqual(binance_request.show_permission_sets, False)
     _CHECK.assertIsNone(binance_request.symbol_status)
+
+
+def test_binance_symbol_search_service_forwards_request() -> None:
+    binance_client = _StubBinanceSymbolSearchClient()
+
+    get_binance_symbol_search(
+        options=BinanceSymbolSearchOptions(
+            q=" btc ",
+            permissions=["SPOT", ""],
+            show_permission_sets=True,
+            symbol_status="TRADING",
+            limit=3,
+        ),
+        client=binance_client,
+    )
+
+    _CHECK.assertIsNotNone(binance_client.request)
+    request = cast(BinanceSymbolSearchRequest, binance_client.request)
+    _CHECK.assertEqual(request.q, "btc")
+    _CHECK.assertEqual(request.permissions, ("SPOT",))
+    _CHECK.assertEqual(request.show_permission_sets, True)
+    _CHECK.assertEqual(request.symbol_status, "TRADING")
+    _CHECK.assertEqual(request.limit, 3)
 
 
 def test_listing_services_forward_twelve_data_requests() -> None:
@@ -761,9 +1004,21 @@ def test_listing_services_forward_twelve_data_requests() -> None:
     _CHECK.assertIsNotNone(twelve_data_client.forex_request)
     forex_request = cast(TwelveDataForexPairsRequest, twelve_data_client.forex_request)
     _CHECK.assertEqual(forex_request.currency_base, "eur")
+    get_twelve_data_symbol_search(
+        options=TwelveDataSymbolSearchOptions(symbol=" tesla "),
+        api_key="test-key",
+        client=twelve_data_client,
+    )
     _CHECK.assertIsNotNone(twelve_data_client.etf_request)
     etf_request = cast(TwelveDataEtfListRequest, twelve_data_client.etf_request)
     _CHECK.assertEqual(etf_request.mic_code, "XNYS")
+    _CHECK.assertIsNotNone(twelve_data_client.symbol_search_request)
+    symbol_search_request = cast(
+        TwelveDataSymbolSearchRequest,
+        twelve_data_client.symbol_search_request,
+    )
+    _CHECK.assertEqual(symbol_search_request.symbol, "tesla")
+    _CHECK.assertEqual(symbol_search_request.api_key, "test-key")
 
 
 def _assert_twelve_data_service_requires_api_key() -> None:
@@ -994,6 +1249,58 @@ def test_binance_fetch_exchange_info_uses_params_and_normalizes_response() -> No
     _CHECK.assertEqual(response.symbols[0].permission_sets, [["SPOT"]])
 
 
+def test_binance_symbol_search_uses_exchange_info_filters_locally() -> None:
+    class StubBinanceSymbolSearchHttpClient(BinanceMarketDataClient):
+        def __init__(self, payload: dict[str, Any]) -> None:
+            self.payload = payload
+            self.seen_path = ""
+            self.seen_params: Mapping[str, str | bool] = {}
+            self.seen_timeout = 0.0
+
+        def _get_json_object(
+            self,
+            path: str,
+            *,
+            params: Mapping[str, str | bool],
+            timeout: float,
+        ) -> dict[str, Any]:
+            self.seen_path = path
+            self.seen_params = params
+            self.seen_timeout = timeout
+            return self.payload
+
+    client = StubBinanceSymbolSearchHttpClient(
+        {
+            "symbols": [
+                _binance_symbol_payload("BTCUSDT", "BTC", "USDT"),
+                _binance_symbol_payload("ETHBTC", "ETH", "BTC"),
+                _binance_symbol_payload("BNBETH", "BNB", "ETH"),
+            ]
+        }
+    )
+    request = BinanceSymbolSearchRequest(
+        q="eth",
+        permissions=("SPOT",),
+        show_permission_sets=True,
+        symbol_status="TRADING",
+        limit=2,
+    )
+
+    response = client.fetch_symbol_search(request, timeout=2.5)
+
+    _CHECK.assertEqual(client.seen_path, "/api/v3/exchangeInfo")
+    _CHECK.assertEqual(client.seen_params["permissions"], '["SPOT"]')
+    _CHECK.assertEqual(client.seen_params["showPermissionSets"], True)
+    _CHECK.assertEqual(client.seen_params["symbolStatus"], "TRADING")
+    _CHECK.assertNotIn("q", client.seen_params)
+    _CHECK.assertNotIn("limit", client.seen_params)
+    _CHECK.assertEqual(client.seen_timeout, 2.5)
+    _CHECK.assertEqual(
+        [symbol.symbol for symbol in response.symbols],
+        ["ETHBTC", "BNBETH"],
+    )
+
+
 class _StubTwelveDataListingHttpClient(TwelveDataMarketDataClient):
     def __init__(self, payloads: dict[str, dict[str, Any]]) -> None:
         self.payloads = payloads
@@ -1008,6 +1315,24 @@ class _StubTwelveDataListingHttpClient(TwelveDataMarketDataClient):
     ) -> dict[str, Any]:
         self.seen.append((path, params, timeout))
         return self.payloads[path]
+
+
+def _binance_symbol_payload(
+    symbol: str,
+    base_asset: str,
+    quote_asset: str,
+) -> dict[str, Any]:
+    return {
+        "symbol": symbol,
+        "baseAsset": base_asset,
+        "quoteAsset": quote_asset,
+        "status": "TRADING",
+        "permissions": ["SPOT"],
+        "permissionSets": [["SPOT"]],
+        "isSpotTradingAllowed": True,
+        "isMarginTradingAllowed": False,
+        "orderTypes": ["LIMIT", "MARKET"],
+    }
 
 
 def _twelve_data_listing_payloads() -> dict[str, dict[str, Any]]:
@@ -1034,6 +1359,21 @@ def _twelve_data_listing_payloads() -> dict[str, dict[str, Any]]:
                     "name": "SPDR S&P 500 ETF Trust",
                     "isin": "US78462F1030",
                 }
+            ],
+            "status": "ok",
+        },
+        "/symbol_search": {
+            "data": [
+                {
+                    "symbol": "TSLA",
+                    "instrument_name": "Tesla Inc",
+                    "exchange": "NASDAQ",
+                    "mic_code": "XNAS",
+                    "country": "United States",
+                    "currency": "USD",
+                    "type": "Common Stock",
+                },
+                {"symbol": "TSLL", "name": "Direxion Daily TSLA Bull"},
             ],
             "status": "ok",
         },
@@ -1081,6 +1421,23 @@ def test_twelve_data_etf_listing_client_uses_path_params_and_normalizes() -> Non
     _CHECK.assertEqual(client.seen[0][0], "/etf")
     _CHECK.assertEqual(client.seen[0][1]["symbol"], "SPY")
     _CHECK.assertEqual(etfs.etfs[0].isin, "US78462F1030")
+
+
+def test_twelve_data_symbol_search_client_uses_path_params_and_normalizes() -> None:
+    client = _StubTwelveDataListingHttpClient(_twelve_data_listing_payloads())
+
+    symbols = client.fetch_symbol_search(
+        TwelveDataSymbolSearchRequest("tsla", "key"),
+        timeout=6.0,
+    )
+
+    _CHECK.assertEqual(client.seen[0][0], "/symbol_search")
+    _CHECK.assertEqual(client.seen[0][1]["symbol"], "tsla")
+    _CHECK.assertEqual(client.seen[0][1]["apikey"], "key")
+    _CHECK.assertEqual(client.seen[0][2], 6.0)
+    _CHECK.assertEqual([symbol.symbol for symbol in symbols.symbols], ["TSLA", "TSLL"])
+    _CHECK.assertEqual(symbols.symbols[0].instrument_name, "Tesla Inc")
+    _CHECK.assertEqual(symbols.symbols[1].name, "Direxion Daily TSLA Bull")
 
 
 def test_market_data_low_level_conversion_helpers() -> None:

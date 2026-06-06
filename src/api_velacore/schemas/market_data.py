@@ -51,6 +51,27 @@ class BinanceExchangeInfoResponse(BaseModel):
     symbols: list[BinanceExchangeSymbol] = Field(default_factory=list)
 
 
+class BinanceSymbolSearchResponse(BaseModel):
+    provider: Literal["binance"] = "binance"
+    symbols: list[BinanceExchangeSymbol] = Field(default_factory=list)
+
+
+class TwelveDataSymbolSearchResult(BaseModel):
+    symbol: str
+    name: str | None = None
+    instrument_name: str | None = None
+    exchange: str | None = None
+    mic_code: str | None = None
+    country: str | None = None
+    currency: str | None = None
+    type: str | None = None
+
+
+class TwelveDataSymbolSearchResponse(BaseModel):
+    provider: Literal["twelve-data"] = "twelve-data"
+    symbols: list[TwelveDataSymbolSearchResult] = Field(default_factory=list)
+
+
 class TwelveDataStock(BaseModel):
     symbol: str
     name: str | None = None

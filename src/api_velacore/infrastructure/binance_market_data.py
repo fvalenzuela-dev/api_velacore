@@ -7,6 +7,7 @@ import httpx
 from api_velacore.schemas.market_data import (
     BinanceExchangeInfoResponse,
     BinanceExchangeSymbol,
+    BinanceSymbolSearchResponse,
     MarketDataCandle,
     MarketDataResponse,
 )
@@ -14,7 +15,11 @@ from api_velacore.schemas.market_data import (
 from .errors import MarketDataProviderError as MarketDataProviderError
 from .market_data_common import _datetime_from_milliseconds
 from .normalization import normalize_binance_exchange_symbol
-from .requests import BinanceExchangeInfoRequest, BinanceKlineRequest
+from .requests import (
+    BinanceExchangeInfoRequest,
+    BinanceKlineRequest,
+    BinanceSymbolSearchRequest,
+)
 
 
 class BinanceMarketDataClient:
@@ -65,6 +70,28 @@ class BinanceMarketDataClient:
         )
         return self._normalize_exchange_info(data)
 
+    def fetch_symbol_search(
+        self,
+        request: BinanceSymbolSearchRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> BinanceSymbolSearchResponse:
+        params = self._build_symbol_search_params(request)
+        data = self._get_json_object(
+            "/api/v3/exchangeInfo",
+            params=params,
+            timeout=timeout,
+        )
+        exchange_info = self._normalize_exchange_info(data)
+        symbols = [
+            symbol
+            for symbol in exchange_info.symbols
+            if self._matches_symbol_search(symbol, request.q)
+        ]
+        if request.limit is not None:
+            symbols = symbols[: request.limit]
+        return BinanceSymbolSearchResponse(symbols=symbols)
+
     def _build_exchange_info_params(
         self,
         request: BinanceExchangeInfoRequest,
@@ -86,6 +113,30 @@ class BinanceMarketDataClient:
             if value is not None:
                 params[key] = value
         return params
+
+    def _build_symbol_search_params(
+        self,
+        request: BinanceSymbolSearchRequest,
+    ) -> dict[str, str | bool]:
+        exchange_info_request = BinanceExchangeInfoRequest(
+            symbol=None,
+            symbols=(),
+            permissions=request.permissions,
+            show_permission_sets=request.show_permission_sets,
+            symbol_status=request.symbol_status,
+        )
+        return self._build_exchange_info_params(exchange_info_request)
+
+    def _matches_symbol_search(
+        self,
+        symbol: BinanceExchangeSymbol,
+        query: str,
+    ) -> bool:
+        normalized_query = query.casefold()
+        return any(
+            normalized_query in value.casefold()
+            for value in (symbol.symbol, symbol.base_asset, symbol.quote_asset)
+        )
 
     def _get_json_rows(
         self,

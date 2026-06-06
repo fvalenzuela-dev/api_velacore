@@ -32,6 +32,15 @@ class BinanceExchangeInfoRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class BinanceSymbolSearchRequest:
+    q: str
+    permissions: tuple[str, ...]
+    show_permission_sets: bool
+    symbol_status: str | None
+    limit: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class TwelveDataTimeSeriesRequest:
     symbol: str
     interval: str
@@ -69,4 +78,10 @@ class TwelveDataEtfListRequest:
     exchange: str
     mic_code: str | None
     country: str
+    api_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class TwelveDataSymbolSearchRequest:
+    symbol: str
     api_key: str

@@ -1,5 +1,5 @@
 import unittest
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -7,27 +7,52 @@ from typing import Any, Literal, cast
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from starlette.routing import Route
 
 import api_velacore.api.routes.market_data as market_data_routes
 from api_velacore.core.config import get_settings
+from api_velacore.infrastructure.errors import MarketDataProviderError
 from api_velacore.infrastructure.market_data import (
-    BinanceKlineRequest,
     BinanceMarketDataClient,
-    MarketDataProviderError,
     TwelveDataMarketDataClient,
-    TwelveDataTimeSeriesRequest,
-    YahooChartRequest,
     YahooFinanceClient,
     _datetime_to_epoch_seconds,
     _float_at,
     _float_or_none,
 )
+from api_velacore.infrastructure.requests import (
+    BinanceExchangeInfoRequest,
+    BinanceKlineRequest,
+    TwelveDataEtfListRequest,
+    TwelveDataForexPairsRequest,
+    TwelveDataStockListRequest,
+    TwelveDataTimeSeriesRequest,
+    YahooChartRequest,
+)
 from api_velacore.main import app
-from api_velacore.schemas.market_data import MarketDataCandle, MarketDataResponse
+from api_velacore.schemas.market_data import (
+    BinanceExchangeInfoResponse,
+    BinanceExchangeSymbol,
+    MarketDataCandle,
+    MarketDataResponse,
+    TwelveDataEtf,
+    TwelveDataEtfsResponse,
+    TwelveDataForexPair,
+    TwelveDataForexPairsResponse,
+    TwelveDataStock,
+    TwelveDataStocksResponse,
+)
 from api_velacore.services.market_data import (
+    TwelveDataEtfListOptions,
+    TwelveDataForexPairsOptions,
     TwelveDataMarketDataOptions,
+    TwelveDataStockListOptions,
+    get_binance_exchange_info,
     get_binance_market_data,
+    get_twelve_data_etfs,
+    get_twelve_data_forex_pairs,
     get_twelve_data_market_data,
+    get_twelve_data_stocks,
     get_yahoo_market_data,
 )
 
@@ -73,6 +98,72 @@ def _sample_response(
                 volume=1234.0,
             )
         ],
+    )
+
+
+def _sample_binance_exchange_info_response() -> BinanceExchangeInfoResponse:
+    return BinanceExchangeInfoResponse(
+        symbols=[
+            BinanceExchangeSymbol(
+                symbol="BTCUSDT",
+                baseAsset="BTC",
+                quoteAsset="USDT",
+                status="TRADING",
+                permissions=["SPOT"],
+                permissionSets=[["SPOT"]],
+                isSpotTradingAllowed=True,
+                isMarginTradingAllowed=False,
+                orderTypes=["LIMIT", "MARKET"],
+            )
+        ]
+    )
+
+
+def _sample_twelve_data_stocks_response() -> TwelveDataStocksResponse:
+    return TwelveDataStocksResponse(
+        stocks=[
+            TwelveDataStock(
+                symbol="AAPL",
+                name="Apple Inc",
+                currency="USD",
+                exchange="NASDAQ",
+                mic_code="XNAS",
+                country="United States",
+                type="Common Stock",
+            )
+        ]
+    )
+
+
+def _sample_twelve_data_forex_pairs_response() -> TwelveDataForexPairsResponse:
+    return TwelveDataForexPairsResponse(
+        forex_pairs=[
+            TwelveDataForexPair(
+                symbol="EUR/USD",
+                currency_group="Major",
+                currency_base="Euro",
+                currency_quote="US Dollar",
+            )
+        ]
+    )
+
+
+def _sample_twelve_data_etfs_response() -> TwelveDataEtfsResponse:
+    return TwelveDataEtfsResponse(
+        etfs=[
+            TwelveDataEtf(
+                symbol="SPY",
+                name="SPDR S&P 500 ETF Trust",
+                currency="USD",
+                exchange="NYSE",
+                mic_code="XNYS",
+                country="United States",
+                figi_code="BBG000BDTBL9",
+                cfi_code="CEOJLS",
+                isin="US78462F1030",
+                cusip="78462F103",
+            )
+        ]
     )
 
 
@@ -155,6 +246,188 @@ def test_twelve_data_endpoint_returns_normalized_market_data(
     _CHECK.assertEqual(body["provider"], "twelve-data")
     _CHECK.assertEqual(body["symbol"], "QQQ")
     _CHECK.assertEqual(body["candles"][0]["open"], 100.0)
+
+
+def test_binance_exchange_info_endpoint_uses_defaults_and_returns_symbols(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_binance_exchange_info(**kwargs: object) -> BinanceExchangeInfoResponse:
+        _CHECK.assertIsNone(kwargs["symbol"])
+        _CHECK.assertIsNone(kwargs["symbols"])
+        _CHECK.assertIsNone(kwargs["permissions"])
+        _CHECK.assertEqual(kwargs["show_permission_sets"], False)
+        _CHECK.assertEqual(kwargs["symbol_status"], "TRADING")
+        return _sample_binance_exchange_info_response()
+
+    monkeypatch.setattr(
+        market_data_routes,
+        "get_binance_exchange_info",
+        fake_get_binance_exchange_info,
+    )
+    client = TestClient(app)
+
+    response = client.get("/market-data/binance/exchange-info")
+
+    _CHECK.assertEqual(response.status_code, 200)
+    body = response.json()
+    _CHECK.assertEqual(body["provider"], "binance")
+    _CHECK.assertEqual(body["symbols"][0]["symbol"], "BTCUSDT")
+    _CHECK.assertEqual(body["symbols"][0]["baseAsset"], "BTC")
+
+
+def test_binance_exchange_info_endpoint_forwards_filters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_binance_exchange_info(**kwargs: object) -> BinanceExchangeInfoResponse:
+        _CHECK.assertIsNone(kwargs["symbol"])
+        _CHECK.assertEqual(kwargs["symbols"], ["BTCUSDT", "ETHUSDT"])
+        _CHECK.assertIsNone(kwargs["permissions"])
+        _CHECK.assertEqual(kwargs["show_permission_sets"], False)
+        _CHECK.assertEqual(kwargs["symbol_status"], "BREAK")
+        return _sample_binance_exchange_info_response()
+
+    monkeypatch.setattr(
+        market_data_routes,
+        "get_binance_exchange_info",
+        fake_get_binance_exchange_info,
+    )
+    client = TestClient(app)
+
+    response = client.get(
+        "/market-data/binance/exchange-info"
+        "?symbols=BTCUSDT&symbols=ETHUSDT"
+        "&showPermissionSets=false&symbolStatus=BREAK"
+    )
+
+    _CHECK.assertEqual(response.status_code, 200)
+
+
+def test_twelve_data_stocks_endpoint_uses_defaults_and_returns_normalized_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_twelve_data_stocks(**kwargs: object) -> TwelveDataStocksResponse:
+        options = cast(TwelveDataStockListOptions, kwargs["options"])
+        _CHECK.assertIsNone(options.symbol)
+        _CHECK.assertEqual(options.exchange, "NASDAQ")
+        _CHECK.assertIsNone(options.mic_code)
+        _CHECK.assertEqual(options.country, "United States")
+        _CHECK.assertEqual(options.type, "Common Stock")
+        return _sample_twelve_data_stocks_response()
+
+    monkeypatch.setattr(
+        market_data_routes,
+        "get_twelve_data_stocks",
+        fake_get_twelve_data_stocks,
+    )
+    client = TestClient(app)
+
+    response = client.get("/market-data/twelve-data/stocks")
+
+    _CHECK.assertEqual(response.status_code, 200)
+    body = response.json()
+    _CHECK.assertEqual(body["provider"], "twelve-data")
+    _CHECK.assertEqual(body["stocks"][0]["symbol"], "AAPL")
+    _CHECK.assertEqual(body["stocks"][0]["mic_code"], "XNAS")
+
+
+def test_twelve_data_forex_pairs_endpoint_forwards_filters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_twelve_data_forex_pairs(
+        **kwargs: object,
+    ) -> TwelveDataForexPairsResponse:
+        options = cast(TwelveDataForexPairsOptions, kwargs["options"])
+        _CHECK.assertEqual(options.symbol, "EUR/USD")
+        _CHECK.assertEqual(options.currency_base, "EUR")
+        _CHECK.assertEqual(options.currency_quote, "USD")
+        _CHECK.assertEqual(options.currency_group, "Minor")
+        return _sample_twelve_data_forex_pairs_response()
+
+    monkeypatch.setattr(
+        market_data_routes,
+        "get_twelve_data_forex_pairs",
+        fake_get_twelve_data_forex_pairs,
+    )
+    client = TestClient(app)
+
+    response = client.get(
+        "/market-data/twelve-data/forex-pairs"
+        "?symbol=EUR/USD&currency_base=EUR&currency_quote=USD&currency_group=Minor"
+    )
+
+    _CHECK.assertEqual(response.status_code, 200)
+    body = response.json()
+    _CHECK.assertEqual(body["forex_pairs"][0]["currency_base"], "Euro")
+
+
+def test_twelve_data_etfs_endpoint_uses_defaults_and_returns_normalized_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_twelve_data_etfs(**kwargs: object) -> TwelveDataEtfsResponse:
+        options = cast(TwelveDataEtfListOptions, kwargs["options"])
+        _CHECK.assertIsNone(options.symbol)
+        _CHECK.assertEqual(options.exchange, "NYSE")
+        _CHECK.assertIsNone(options.mic_code)
+        _CHECK.assertEqual(options.country, "United States")
+        return _sample_twelve_data_etfs_response()
+
+    monkeypatch.setattr(
+        market_data_routes,
+        "get_twelve_data_etfs",
+        fake_get_twelve_data_etfs,
+    )
+    client = TestClient(app)
+
+    response = client.get("/market-data/twelve-data/etfs")
+
+    _CHECK.assertEqual(response.status_code, 200)
+    body = response.json()
+    _CHECK.assertEqual(body["etfs"][0]["symbol"], "SPY")
+    _CHECK.assertEqual(body["etfs"][0]["figi_code"], "BBG000BDTBL9")
+
+
+def test_twelve_data_listing_endpoints_return_missing_api_key_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("VELACORE_TWELVE_DATA_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+    get_settings.cache_clear()
+    try:
+        client = TestClient(app)
+        for path in (
+            "/market-data/twelve-data/stocks",
+            "/market-data/twelve-data/forex-pairs",
+            "/market-data/twelve-data/etfs",
+        ):
+            response = client.get(path)
+            _CHECK.assertEqual(response.status_code, 503)
+            _CHECK.assertEqual(
+                response.json(), {"detail": "Twelve Data API key is not configured"}
+            )
+    finally:
+        get_settings.cache_clear()
+
+
+def test_static_listing_routes_are_not_captured_by_dynamic_symbol_routes() -> None:
+    paths = [route.path for route in app.routes if isinstance(route, Route)]
+
+    _CHECK.assertLess(
+        paths.index("/market-data/binance/exchange-info"),
+        paths.index("/market-data/binance/{symbol}"),
+    )
+    _CHECK.assertLess(
+        paths.index("/market-data/twelve-data/stocks"),
+        paths.index("/market-data/twelve-data/{symbol}"),
+    )
+    _CHECK.assertLess(
+        paths.index("/market-data/twelve-data/forex-pairs"),
+        paths.index("/market-data/twelve-data/{symbol}"),
+    )
+    _CHECK.assertLess(
+        paths.index("/market-data/twelve-data/etfs"),
+        paths.index("/market-data/twelve-data/{symbol}"),
+    )
 
 
 def test_provider_errors_are_mapped_to_http_errors(
@@ -285,6 +558,212 @@ def test_twelve_data_service_requires_api_key(
         _assert_twelve_data_service_requires_api_key()
     finally:
         get_settings.cache_clear()
+
+
+def test_twelve_data_listing_services_require_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("VELACORE_TWELVE_DATA_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+    get_settings.cache_clear()
+    try:
+        _assert_twelve_data_listing_services_require_api_key()
+    finally:
+        get_settings.cache_clear()
+
+
+def _assert_twelve_data_listing_services_require_api_key() -> None:
+    service_calls: list[Callable[[], object]] = [
+        lambda: get_twelve_data_stocks(
+            options=TwelveDataStockListOptions(
+                symbol=None,
+                exchange="NASDAQ",
+                mic_code=None,
+                country="United States",
+                type="Common Stock",
+            ),
+            api_key=None,
+            client=TwelveDataMarketDataClient(),
+        ),
+        lambda: get_twelve_data_forex_pairs(
+            options=TwelveDataForexPairsOptions(
+                symbol=None,
+                currency_base=None,
+                currency_quote=None,
+                currency_group="Major",
+            ),
+            api_key=None,
+            client=TwelveDataMarketDataClient(),
+        ),
+        lambda: get_twelve_data_etfs(
+            options=TwelveDataEtfListOptions(
+                symbol=None,
+                exchange="NYSE",
+                mic_code=None,
+                country="United States",
+            ),
+            api_key=None,
+            client=TwelveDataMarketDataClient(),
+        ),
+    ]
+    for service_call in service_calls:
+        try:
+            service_call()
+        except MarketDataProviderError as exc:
+            _CHECK.assertEqual(exc.status_code, 503)
+            _CHECK.assertEqual(exc.message, "Twelve Data API key is not configured")
+        else:
+            _CHECK.fail("Expected MarketDataProviderError")
+
+
+def test_binance_exchange_info_service_validates_exclusive_symbol_filters() -> None:
+    invalid_cases: list[tuple[str | None, list[str] | None, list[str] | None, str]] = [
+        (
+            "BTCUSDT",
+            ["ETHUSDT"],
+            None,
+            "Use either symbol or symbols, not both",
+        ),
+        (
+            "BTCUSDT",
+            None,
+            ["SPOT"],
+            "Use permissions without symbol or symbols filters",
+        ),
+        (
+            None,
+            ["BTCUSDT"],
+            ["SPOT"],
+            "Use permissions without symbol or symbols filters",
+        ),
+    ]
+    for symbol, symbols, permissions, expected_message in invalid_cases:
+        try:
+            get_binance_exchange_info(
+                symbol=symbol,
+                symbols=symbols,
+                permissions=permissions,
+                show_permission_sets=True,
+                symbol_status="TRADING",
+                client=BinanceMarketDataClient(),
+            )
+        except MarketDataProviderError as exc:
+            _CHECK.assertEqual(exc.status_code, 422)
+            _CHECK.assertEqual(exc.message, expected_message)
+        else:
+            _CHECK.fail("Expected MarketDataProviderError")
+
+
+class _StubBinanceExchangeInfoClient(BinanceMarketDataClient):
+    def __init__(self) -> None:
+        self.request: BinanceExchangeInfoRequest | None = None
+
+    def fetch_exchange_info(
+        self,
+        request: BinanceExchangeInfoRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> BinanceExchangeInfoResponse:
+        self.request = request
+        return _sample_binance_exchange_info_response()
+
+
+class _StubTwelveDataListingClient(TwelveDataMarketDataClient):
+    def __init__(self) -> None:
+        self.stock_request: TwelveDataStockListRequest | None = None
+        self.forex_request: TwelveDataForexPairsRequest | None = None
+        self.etf_request: TwelveDataEtfListRequest | None = None
+
+    def fetch_stocks(
+        self,
+        request: TwelveDataStockListRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> TwelveDataStocksResponse:
+        self.stock_request = request
+        return _sample_twelve_data_stocks_response()
+
+    def fetch_forex_pairs(
+        self,
+        request: TwelveDataForexPairsRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> TwelveDataForexPairsResponse:
+        self.forex_request = request
+        return _sample_twelve_data_forex_pairs_response()
+
+    def fetch_etfs(
+        self,
+        request: TwelveDataEtfListRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> TwelveDataEtfsResponse:
+        self.etf_request = request
+        return _sample_twelve_data_etfs_response()
+
+
+def test_listing_services_forward_binance_request() -> None:
+    binance_client = _StubBinanceExchangeInfoClient()
+    get_binance_exchange_info(
+        symbol=" ",
+        symbols=["btcusdt", ""],
+        permissions=None,
+        show_permission_sets=False,
+        symbol_status="TRADING",
+        client=binance_client,
+    )
+    _CHECK.assertIsNotNone(binance_client.request)
+    binance_request = cast(BinanceExchangeInfoRequest, binance_client.request)
+    _CHECK.assertEqual(binance_request.symbols, ("btcusdt",))
+    _CHECK.assertEqual(binance_request.permissions, ())
+    _CHECK.assertEqual(binance_request.show_permission_sets, False)
+    _CHECK.assertIsNone(binance_request.symbol_status)
+
+
+def test_listing_services_forward_twelve_data_requests() -> None:
+    twelve_data_client = _StubTwelveDataListingClient()
+    get_twelve_data_stocks(
+        options=TwelveDataStockListOptions(
+            symbol="aapl",
+            exchange="NASDAQ",
+            mic_code="XNAS",
+            country="United States",
+            type="Common Stock",
+        ),
+        api_key="test-key",
+        client=twelve_data_client,
+    )
+    get_twelve_data_forex_pairs(
+        options=TwelveDataForexPairsOptions(
+            symbol="eur/usd",
+            currency_base="eur",
+            currency_quote="usd",
+            currency_group="Major",
+        ),
+        api_key="test-key",
+        client=twelve_data_client,
+    )
+    get_twelve_data_etfs(
+        options=TwelveDataEtfListOptions(
+            symbol="spy",
+            exchange="NYSE",
+            mic_code="XNYS",
+            country="United States",
+        ),
+        api_key="test-key",
+        client=twelve_data_client,
+    )
+    _CHECK.assertIsNotNone(twelve_data_client.stock_request)
+    stock_request = cast(TwelveDataStockListRequest, twelve_data_client.stock_request)
+    _CHECK.assertEqual(stock_request.symbol, "aapl")
+    _CHECK.assertEqual(stock_request.api_key, "test-key")
+    _CHECK.assertIsNotNone(twelve_data_client.forex_request)
+    forex_request = cast(TwelveDataForexPairsRequest, twelve_data_client.forex_request)
+    _CHECK.assertEqual(forex_request.currency_base, "eur")
+    _CHECK.assertIsNotNone(twelve_data_client.etf_request)
+    etf_request = cast(TwelveDataEtfListRequest, twelve_data_client.etf_request)
+    _CHECK.assertEqual(etf_request.mic_code, "XNYS")
 
 
 def _assert_twelve_data_service_requires_api_key() -> None:
@@ -456,6 +935,152 @@ def _http_status_error(status_code: int) -> httpx.HTTPStatusError:
     request = httpx.Request("GET", "https://example.test")
     response = httpx.Response(status_code, request=request)
     return httpx.HTTPStatusError("provider failed", request=request, response=response)
+
+
+def test_binance_fetch_exchange_info_uses_params_and_normalizes_response() -> None:
+    class StubBinanceExchangeInfoClient(BinanceMarketDataClient):
+        def __init__(self, payload: dict[str, Any]) -> None:
+            self.payload = payload
+            self.seen_path = ""
+            self.seen_params: Mapping[str, str | bool] = {}
+            self.seen_timeout = 0.0
+
+        def _get_json_object(
+            self,
+            path: str,
+            *,
+            params: Mapping[str, str | bool],
+            timeout: float,
+        ) -> dict[str, Any]:
+            self.seen_path = path
+            self.seen_params = params
+            self.seen_timeout = timeout
+            return self.payload
+
+    client = StubBinanceExchangeInfoClient(
+        {
+            "symbols": [
+                {
+                    "symbol": "BTCUSDT",
+                    "baseAsset": "BTC",
+                    "quoteAsset": "USDT",
+                    "status": "TRADING",
+                    "permissions": ["SPOT"],
+                    "permissionSets": [["SPOT"]],
+                    "isSpotTradingAllowed": True,
+                    "isMarginTradingAllowed": False,
+                    "orderTypes": ["LIMIT", "MARKET"],
+                }
+            ]
+        }
+    )
+    request = BinanceExchangeInfoRequest(
+        symbol=None,
+        symbols=("btcusdt", "ethusdt"),
+        permissions=(),
+        show_permission_sets=False,
+        symbol_status=None,
+    )
+
+    response = client.fetch_exchange_info(request, timeout=2.0)
+
+    _CHECK.assertEqual(client.seen_path, "/api/v3/exchangeInfo")
+    _CHECK.assertEqual(client.seen_params["symbols"], '["BTCUSDT", "ETHUSDT"]')
+    _CHECK.assertNotIn("permissions", client.seen_params)
+    _CHECK.assertEqual(client.seen_params["showPermissionSets"], False)
+    _CHECK.assertNotIn("symbolStatus", client.seen_params)
+    _CHECK.assertEqual(client.seen_timeout, 2.0)
+    _CHECK.assertEqual(response.symbols[0].base_asset, "BTC")
+    _CHECK.assertEqual(response.symbols[0].permission_sets, [["SPOT"]])
+
+
+class _StubTwelveDataListingHttpClient(TwelveDataMarketDataClient):
+    def __init__(self, payloads: dict[str, dict[str, Any]]) -> None:
+        self.payloads = payloads
+        self.seen: list[tuple[str, Mapping[str, str | int | bool], float]] = []
+
+    def _get_json_from_path(
+        self,
+        path: str,
+        *,
+        params: Mapping[str, str | int | bool],
+        timeout: float,
+    ) -> dict[str, Any]:
+        self.seen.append((path, params, timeout))
+        return self.payloads[path]
+
+
+def _twelve_data_listing_payloads() -> dict[str, dict[str, Any]]:
+    return {
+        "/stocks": {
+            "data": [{"symbol": "AAPL", "name": "Apple Inc", "type": "Common Stock"}],
+            "status": "ok",
+        },
+        "/forex_pairs": {
+            "data": [
+                {
+                    "symbol": "EUR/USD",
+                    "currency_group": "Major",
+                    "currency_base": "Euro",
+                    "currency_quote": "US Dollar",
+                }
+            ],
+            "status": "ok",
+        },
+        "/etf": {
+            "data": [
+                {
+                    "symbol": "SPY",
+                    "name": "SPDR S&P 500 ETF Trust",
+                    "isin": "US78462F1030",
+                }
+            ],
+            "status": "ok",
+        },
+    }
+
+
+def test_twelve_data_stock_listing_client_uses_path_params_and_normalizes() -> None:
+    client = _StubTwelveDataListingHttpClient(_twelve_data_listing_payloads())
+
+    stocks = client.fetch_stocks(
+        TwelveDataStockListRequest(
+            "aapl", "NASDAQ", "XNAS", "United States", "Common Stock", "key"
+        ),
+        timeout=3.0,
+    )
+
+    _CHECK.assertEqual(client.seen[0][0], "/stocks")
+    _CHECK.assertEqual(client.seen[0][1]["symbol"], "AAPL")
+    _CHECK.assertEqual(client.seen[0][1]["apikey"], "key")
+    _CHECK.assertEqual(client.seen[0][2], 3.0)
+    _CHECK.assertEqual(stocks.stocks[0].name, "Apple Inc")
+
+
+def test_twelve_data_forex_listing_client_uses_path_params_and_normalizes() -> None:
+    client = _StubTwelveDataListingHttpClient(_twelve_data_listing_payloads())
+
+    forex_pairs = client.fetch_forex_pairs(
+        TwelveDataForexPairsRequest("eur/usd", "eur", "usd", "Major", "key"),
+        timeout=4.0,
+    )
+
+    _CHECK.assertEqual(client.seen[0][0], "/forex_pairs")
+    _CHECK.assertEqual(client.seen[0][1]["currency_base"], "EUR")
+    _CHECK.assertEqual(forex_pairs.forex_pairs[0].currency_quote, "US Dollar")
+
+
+def test_twelve_data_etf_listing_client_uses_path_params_and_normalizes() -> None:
+    client = _StubTwelveDataListingHttpClient(_twelve_data_listing_payloads())
+
+    etfs = client.fetch_etfs(
+        TwelveDataEtfListRequest("spy", "NYSE", "XNYS", "United States", "key"),
+        timeout=5.0,
+    )
+
+    _CHECK.assertEqual(client.seen[0][0], "/etf")
+    _CHECK.assertEqual(client.seen[0][1]["symbol"], "SPY")
+    _CHECK.assertEqual(etfs.etfs[0].isin, "US78462F1030")
 
 
 def test_market_data_low_level_conversion_helpers() -> None:

@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 import api_velacore.api.routes.indicators as indicator_routes
 import api_velacore.services.indicators as indicator_services
-from api_velacore.infrastructure.market_data import MarketDataProviderError
+from api_velacore.infrastructure.errors import MarketDataProviderError
 from api_velacore.main import app
 from api_velacore.schemas.indicators import IndicatorPoint
 from api_velacore.schemas.market_data import MarketDataCandle, MarketDataResponse

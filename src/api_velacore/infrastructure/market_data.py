@@ -1,4 +1,3 @@
-# pylint: disable=too-many-lines
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -19,6 +18,9 @@ from api_velacore.schemas.market_data import (
     TwelveDataStock,
     TwelveDataStocksResponse,
 )
+
+from .errors import MarketDataProviderError as MarketDataProviderError
+from .normalization import normalize_binance_exchange_symbol
 
 BINANCE_INTERVALS = frozenset(
     {
@@ -157,14 +159,6 @@ class TwelveDataEtfListRequest:
     api_key: str
 
 
-class MarketDataProviderError(Exception):
-    def __init__(self, message: str, status_code: int) -> None:
-        """Create a normalized market data provider error."""
-        self.message = message
-        self.status_code = status_code
-        super().__init__(message)
-
-
 def _datetime_to_epoch_seconds(value: str) -> int:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -233,30 +227,6 @@ def _required_string(
     if not isinstance(value, str) or not value:
         raise MarketDataProviderError(provider_message, 502)
     return value
-
-
-def _string_list(value: object, *, provider_message: str) -> list[str]:
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        raise MarketDataProviderError(provider_message, 502)
-    items: list[str] = []
-    for item in value:
-        if not isinstance(item, str):
-            raise MarketDataProviderError(provider_message, 502)
-        items.append(item)
-    return items
-
-
-def _string_matrix(value: object, *, provider_message: str) -> list[list[str]]:
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        raise MarketDataProviderError(provider_message, 502)
-    matrix: list[list[str]] = []
-    for row in value:
-        matrix.append(_string_list(row, provider_message=provider_message))
-    return matrix
 
 
 class YahooFinanceClient:
@@ -535,56 +505,7 @@ class BinanceMarketDataClient:
         )
 
     def _normalize_exchange_symbol(self, row: object) -> BinanceExchangeSymbol:
-        if not isinstance(row, Mapping):
-            raise MarketDataProviderError(
-                "Binance returned malformed exchange info data", 502
-            )
-        typed_row = cast(Mapping[str, Any], row)
-        message = "Binance returned malformed exchange info data"
-        return BinanceExchangeSymbol.model_validate(
-            {
-                "symbol": _required_string(
-                    typed_row,
-                    "symbol",
-                    provider_message=message,
-                ),
-                "baseAsset": _required_string(
-                    typed_row,
-                    "baseAsset",
-                    provider_message=message,
-                ),
-                "quoteAsset": _required_string(
-                    typed_row,
-                    "quoteAsset",
-                    provider_message=message,
-                ),
-                "status": _required_string(
-                    typed_row,
-                    "status",
-                    provider_message=message,
-                ),
-                "permissions": _string_list(
-                    typed_row.get("permissions"),
-                    provider_message=message,
-                ),
-                "permissionSets": _string_matrix(
-                    typed_row.get("permissionSets"),
-                    provider_message=message,
-                ),
-                "isSpotTradingAllowed": cast(
-                    bool | None,
-                    typed_row.get("isSpotTradingAllowed"),
-                ),
-                "isMarginTradingAllowed": cast(
-                    bool | None,
-                    typed_row.get("isMarginTradingAllowed"),
-                ),
-                "orderTypes": _string_list(
-                    typed_row.get("orderTypes"),
-                    provider_message=message,
-                ),
-            }
-        )
+        return normalize_binance_exchange_symbol(row)
 
     def _raise_http_error(self, exc: httpx.HTTPStatusError) -> NoReturn:
         if exc.response.status_code == 429:

@@ -13,8 +13,11 @@ from api_velacore.schemas.indicators import IndicatorPoint
 from api_velacore.schemas.market_data import MarketDataCandle, MarketDataResponse
 from api_velacore.services.indicators import (
     EmaIndicatorOptions,
+    RsiIndicatorOptions,
     calculate_ema_points,
+    calculate_rsi_points,
     get_ema_indicator,
+    get_rsi_indicator,
 )
 from api_velacore.services.market_data import TwelveDataMarketDataOptions
 
@@ -180,6 +183,101 @@ def test_ema_endpoint_rejects_invalid_period() -> None:
     _CHECK.assertEqual(response.status_code, 422)
 
 
+def test_rsi_endpoint_returns_chart_ready_points(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_rsi_indicator(**kwargs: object) -> list[IndicatorPoint]:
+        options = cast(RsiIndicatorOptions, kwargs["options"])
+        _CHECK.assertEqual(options.symbol, "AAPL")
+        _CHECK.assertEqual(options.provider, "yahoo")
+        _CHECK.assertEqual(options.period, 14)
+        _CHECK.assertEqual(options.range, "1mo")
+        _CHECK.assertEqual(options.interval, "1d")
+        _CHECK.assertEqual(options.outputsize, 500)
+        _CHECK.assertEqual(options.limit, 500)
+        return [
+            IndicatorPoint(
+                time=datetime(2026, 1, 15, tzinfo=UTC),
+                value=55.5,
+            )
+        ]
+
+    monkeypatch.setattr(
+        indicator_routes,
+        "get_rsi_indicator",
+        fake_get_rsi_indicator,
+    )
+    client = TestClient(app)
+
+    response = client.get("/indicators/rsi/AAPL")
+
+    _CHECK.assertEqual(response.status_code, 200)
+    _CHECK.assertEqual(
+        response.json(),
+        [{"time": "2026-01-15T00:00:00Z", "value": 55.5}],
+    )
+
+
+def test_rsi_endpoint_accepts_binance_provider_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_rsi_indicator(**kwargs: object) -> list[IndicatorPoint]:
+        options = cast(RsiIndicatorOptions, kwargs["options"])
+        _CHECK.assertEqual(options.provider, "binance")
+        _CHECK.assertEqual(options.period, 3)
+        _CHECK.assertEqual(options.limit, 100)
+        return [IndicatorPoint(time=datetime(2026, 1, 4, tzinfo=UTC), value=100.0)]
+
+    monkeypatch.setattr(indicator_routes, "get_rsi_indicator", fake_get_rsi_indicator)
+    client = TestClient(app)
+
+    response = client.get("/indicators/rsi/BTCUSDT?provider=binance&period=3&limit=100")
+
+    _CHECK.assertEqual(response.status_code, 200)
+
+
+def test_rsi_endpoint_accepts_twelve_data_provider_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_rsi_indicator(**kwargs: object) -> list[IndicatorPoint]:
+        options = cast(RsiIndicatorOptions, kwargs["options"])
+        _CHECK.assertEqual(options.provider, "twelve-data")
+        _CHECK.assertEqual(options.period, 3)
+        _CHECK.assertEqual(options.outputsize, 100)
+        _CHECK.assertEqual(options.asset_type, "etf")
+        return [IndicatorPoint(time=datetime(2026, 1, 4, tzinfo=UTC), value=100.0)]
+
+    monkeypatch.setattr(indicator_routes, "get_rsi_indicator", fake_get_rsi_indicator)
+    client = TestClient(app)
+
+    response = client.get(
+        "/indicators/rsi/QQQ?provider=twelve-data&period=3&outputsize=100&asset_type=etf"
+    )
+
+    _CHECK.assertEqual(response.status_code, 200)
+
+
+def test_rsi_endpoint_maps_provider_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_rsi_indicator(**kwargs: object) -> list[IndicatorPoint]:
+        raise MarketDataProviderError("Not enough candles to calculate RSI", 422)
+
+    monkeypatch.setattr(
+        indicator_routes,
+        "get_rsi_indicator",
+        fake_get_rsi_indicator,
+    )
+    client = TestClient(app)
+
+    response = client.get("/indicators/rsi/AAPL?period=20")
+
+    _CHECK.assertEqual(response.status_code, 422)
+    _CHECK.assertEqual(
+        response.json(), {"detail": "Not enough candles to calculate RSI"}
+    )
+
+
 def test_calculate_ema_points_uses_close_prices_and_omits_warmup() -> None:
     candles = [
         _candle(1, 10.0),
@@ -222,6 +320,60 @@ def test_calculate_ema_points_rejects_insufficient_data() -> None:
 
     _CHECK.assertEqual(exc_info.value.status_code, 422)
     _CHECK.assertEqual(exc_info.value.message, "Not enough candles to calculate EMA")
+
+
+def test_calculate_rsi_points_uses_close_prices_and_omits_warmup() -> None:
+    candles = [
+        _candle(1, 44.0),
+        _candle(2, 45.0),
+        _candle(3, 43.0),
+        _candle(4, 46.0),
+        _candle(5, 47.0),
+    ]
+
+    points = calculate_rsi_points(candles=candles, period=3)
+
+    _CHECK.assertEqual(
+        [point.time for point in points],
+        [candles[3].timestamp, candles[4].timestamp],
+    )
+    _CHECK.assertAlmostEqual(points[0].value, 66.66666666666666)
+    _CHECK.assertAlmostEqual(points[1].value, 73.33333333333333)
+
+
+def test_calculate_rsi_points_sorts_candles_chronologically() -> None:
+    candles = [
+        _candle(4, 46.0),
+        _candle(1, 44.0),
+        _candle(3, 43.0),
+        _candle(2, 45.0),
+    ]
+
+    points = calculate_rsi_points(candles=candles, period=3)
+
+    _CHECK.assertEqual(points[0].time, _candle(4, 46.0).timestamp)
+    _CHECK.assertAlmostEqual(points[0].value, 66.66666666666666)
+
+
+def test_calculate_rsi_points_returns_neutral_for_flat_series() -> None:
+    candles = [
+        _candle(1, 10.0),
+        _candle(2, 10.0),
+        _candle(3, 10.0),
+        _candle(4, 10.0),
+    ]
+
+    points = calculate_rsi_points(candles=candles, period=3)
+
+    _CHECK.assertEqual(points[0].value, 50.0)
+
+
+def test_calculate_rsi_points_rejects_insufficient_data() -> None:
+    with pytest.raises(MarketDataProviderError) as exc_info:
+        calculate_rsi_points(candles=[_candle(1, 10.0), _candle(2, 11.0)], period=3)
+
+    _CHECK.assertEqual(exc_info.value.status_code, 422)
+    _CHECK.assertEqual(exc_info.value.message, "Not enough candles to calculate RSI")
 
 
 def test_ema_service_routes_yahoo_provider(
@@ -413,3 +565,179 @@ def test_ema_service_preserves_provider_failures(
 
     _CHECK.assertEqual(exc_info.value.status_code, 502)
     _CHECK.assertEqual(exc_info.value.message, "Yahoo Finance request failed")
+
+
+def test_rsi_service_routes_yahoo_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_yahoo_market_data(**kwargs: object) -> MarketDataResponse:
+        _CHECK.assertEqual(kwargs["symbol"], "AAPL")
+        _CHECK.assertEqual(kwargs["period"], "1mo")
+        _CHECK.assertEqual(kwargs["interval"], "1d")
+        return MarketDataResponse(
+            provider="yahoo",
+            symbol="AAPL",
+            interval="1d",
+            range="1mo",
+            candles=[
+                _candle(1, 10.0),
+                _candle(2, 11.0),
+                _candle(3, 12.0),
+                _candle(4, 13.0),
+            ],
+        )
+
+    monkeypatch.setattr(
+        indicator_services,
+        "get_yahoo_market_data",
+        fake_get_yahoo_market_data,
+    )
+
+    points = get_rsi_indicator(
+        options=RsiIndicatorOptions(
+            symbol="AAPL",
+            period=3,
+            provider="yahoo",
+            range="1mo",
+            interval="1d",
+            outputsize=500,
+            limit=500,
+            asset_type=None,
+        )
+    )
+
+    _CHECK.assertEqual(
+        points, [IndicatorPoint(time=_candle(4, 13.0).timestamp, value=100.0)]
+    )
+
+
+def test_rsi_service_routes_binance_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_binance_market_data(**kwargs: object) -> MarketDataResponse:
+        _CHECK.assertEqual(kwargs["symbol"], "BTCUSDT")
+        _CHECK.assertEqual(kwargs["interval"], "1d")
+        _CHECK.assertEqual(kwargs["limit"], 4)
+        return MarketDataResponse(
+            provider="binance",
+            symbol="BTCUSDT",
+            interval="1d",
+            candles=[
+                _candle(1, 10.0),
+                _candle(2, 11.0),
+                _candle(3, 12.0),
+                _candle(4, 13.0),
+            ],
+        )
+
+    monkeypatch.setattr(
+        indicator_services,
+        "get_binance_market_data",
+        fake_get_binance_market_data,
+    )
+
+    points = get_rsi_indicator(
+        options=RsiIndicatorOptions(
+            symbol="BTCUSDT",
+            period=3,
+            provider="binance",
+            range="1mo",
+            interval="1d",
+            outputsize=500,
+            limit=4,
+            asset_type=None,
+        )
+    )
+
+    _CHECK.assertEqual(
+        points, [IndicatorPoint(time=_candle(4, 13.0).timestamp, value=100.0)]
+    )
+
+
+def test_rsi_service_routes_twelve_data_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_twelve_data_market_data(**kwargs: object) -> MarketDataResponse:
+        options = cast(TwelveDataMarketDataOptions, kwargs["options"])
+        _CHECK.assertEqual(options.symbol, "QQQ")
+        _CHECK.assertEqual(options.interval, "1day")
+        _CHECK.assertEqual(options.outputsize, 4)
+        _CHECK.assertEqual(options.asset_type, "etf")
+        return MarketDataResponse(
+            provider="twelve-data",
+            symbol="QQQ",
+            interval="1day",
+            candles=[
+                _candle(1, 10.0),
+                _candle(2, 11.0),
+                _candle(3, 12.0),
+                _candle(4, 13.0),
+            ],
+        )
+
+    monkeypatch.setattr(
+        indicator_services,
+        "get_twelve_data_market_data",
+        fake_get_twelve_data_market_data,
+    )
+
+    points = get_rsi_indicator(
+        options=RsiIndicatorOptions(
+            symbol="QQQ",
+            period=3,
+            provider="twelve-data",
+            range="1mo",
+            interval="1d",
+            outputsize=4,
+            limit=500,
+            asset_type="etf",
+        )
+    )
+
+    _CHECK.assertEqual(
+        points, [IndicatorPoint(time=_candle(4, 13.0).timestamp, value=100.0)]
+    )
+
+
+def test_rsi_service_rejects_binance_limit_equal_to_period() -> None:
+    with pytest.raises(MarketDataProviderError) as exc_info:
+        get_rsi_indicator(
+            options=RsiIndicatorOptions(
+                symbol="BTCUSDT",
+                period=3,
+                provider="binance",
+                range="1mo",
+                interval="1d",
+                outputsize=500,
+                limit=3,
+                asset_type=None,
+            )
+        )
+
+    _CHECK.assertEqual(exc_info.value.status_code, 422)
+    _CHECK.assertEqual(
+        exc_info.value.message,
+        "Binance source limit must be greater than or equal to RSI period plus 1",
+    )
+
+
+def test_rsi_service_rejects_twelve_data_outputsize_equal_to_period() -> None:
+    with pytest.raises(MarketDataProviderError) as exc_info:
+        get_rsi_indicator(
+            options=RsiIndicatorOptions(
+                symbol="QQQ",
+                period=3,
+                provider="twelve-data",
+                range="1mo",
+                interval="1d",
+                outputsize=3,
+                limit=500,
+                asset_type="etf",
+            )
+        )
+
+    _CHECK.assertEqual(exc_info.value.status_code, 422)
+    _CHECK.assertEqual(
+        exc_info.value.message,
+        "Twelve Data outputsize must be greater than or equal to RSI period plus 1",
+    )

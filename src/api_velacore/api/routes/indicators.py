@@ -10,8 +10,10 @@ from api_velacore.schemas.indicators import (
 )
 from api_velacore.services.indicators import (
     EmaIndicatorOptions,
+    RsiIndicatorOptions,
     default_source_limit,
     get_ema_indicator,
+    get_rsi_indicator,
 )
 
 router = APIRouter(prefix="/indicators", tags=["indicators"])
@@ -24,6 +26,10 @@ type ProviderQuery = Annotated[
 type PeriodQuery = Annotated[
     int,
     Query(ge=1, le=5000, description="EMA length; defaults to 20"),
+]
+type RsiPeriodQuery = Annotated[
+    int,
+    Query(ge=1, le=5000, description="RSI length; defaults to 14"),
 ]
 type RangeQuery = Annotated[
     str | None,
@@ -69,6 +75,39 @@ def get_ema_indicator_endpoint(
     try:
         return get_ema_indicator(
             options=EmaIndicatorOptions(
+                symbol=symbol,
+                period=period,
+                provider=provider,
+                range=range_,
+                interval=interval,
+                outputsize=outputsize,
+                limit=limit or default_source_limit(period),
+                asset_type=asset_type,
+            ),
+        )
+    except MarketDataProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.get(
+    "/rsi/{symbol}",
+    response_model=list[IndicatorPoint],
+    status_code=status.HTTP_200_OK,
+    summary="Calculate RSI indicator points for chart overlays",
+)
+def get_rsi_indicator_endpoint(
+    symbol: SymbolPath,
+    provider: ProviderQuery = "yahoo",
+    period: RsiPeriodQuery = 14,
+    range_: RangeQuery = "1mo",
+    interval: IntervalQuery = "1d",
+    outputsize: OutputSizeQuery = 500,
+    limit: LimitQuery = None,
+    asset_type: AssetTypeQuery = None,
+) -> list[IndicatorPoint]:
+    try:
+        return get_rsi_indicator(
+            options=RsiIndicatorOptions(
                 symbol=symbol,
                 period=period,
                 provider=provider,

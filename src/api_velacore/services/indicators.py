@@ -49,9 +49,26 @@ class EmaIndicatorOptions:
     asset_type: TwelveDataIndicatorAssetType | None
 
 
+@dataclass(frozen=True)
+class RsiIndicatorOptions:
+    symbol: str
+    period: int
+    provider: IndicatorProvider
+    range: str | None
+    interval: str
+    outputsize: int
+    limit: int
+    asset_type: TwelveDataIndicatorAssetType | None
+
+
 def get_ema_indicator(*, options: EmaIndicatorOptions) -> list[IndicatorPoint]:
     candles = _fetch_source_candles(options)
     return calculate_ema_points(candles=candles, period=options.period)
+
+
+def get_rsi_indicator(*, options: RsiIndicatorOptions) -> list[IndicatorPoint]:
+    candles = _fetch_source_candles(options)
+    return calculate_rsi_points(candles=candles, period=options.period)
 
 
 def calculate_ema_points(
@@ -83,16 +100,76 @@ def calculate_ema_points(
     return points
 
 
-def _fetch_source_candles(options: EmaIndicatorOptions) -> list[MarketDataCandle]:
+def calculate_rsi_points(
+    *,
+    candles: list[MarketDataCandle],
+    period: int,
+) -> list[IndicatorPoint]:
+    if period < 1:
+        raise MarketDataProviderError("RSI period must be greater than 0", 422)
+
+    chronological_candles = sorted(candles, key=lambda candle: candle.timestamp)
+    if len(chronological_candles) <= period:
+        raise MarketDataProviderError("Not enough candles to calculate RSI", 422)
+
+    changes = [
+        chronological_candles[index].close - chronological_candles[index - 1].close
+        for index in range(1, len(chronological_candles))
+    ]
+    seed_changes = changes[:period]
+    average_gain = sum(max(change, 0) for change in seed_changes) / period
+    average_loss = sum(abs(min(change, 0)) for change in seed_changes) / period
+    points = [
+        IndicatorPoint(
+            time=chronological_candles[period].timestamp,
+            value=_rsi_value(average_gain=average_gain, average_loss=average_loss),
+        )
+    ]
+
+    for index, change in enumerate(changes[period:], start=period + 1):
+        gain = max(change, 0)
+        loss = abs(min(change, 0))
+        average_gain = ((average_gain * (period - 1)) + gain) / period
+        average_loss = ((average_loss * (period - 1)) + loss) / period
+        points.append(
+            IndicatorPoint(
+                time=chronological_candles[index].timestamp,
+                value=_rsi_value(average_gain=average_gain, average_loss=average_loss),
+            )
+        )
+
+    return points
+
+
+def _rsi_value(*, average_gain: float, average_loss: float) -> float:
+    if average_gain == 0 and average_loss == 0:
+        return 50.0
+    if average_loss == 0:
+        return 100.0
+    relative_strength = average_gain / average_loss
+    return 100 - (100 / (1 + relative_strength))
+
+
+def _fetch_source_candles(
+    options: EmaIndicatorOptions | RsiIndicatorOptions,
+) -> list[MarketDataCandle]:
     response = _fetch_source_market_data(options)
     return response.candles
 
 
-def _fetch_source_market_data(options: EmaIndicatorOptions) -> MarketDataResponse:
+def _fetch_source_market_data(
+    options: EmaIndicatorOptions | RsiIndicatorOptions,
+) -> MarketDataResponse:
+    indicator_name = "EMA" if isinstance(options, EmaIndicatorOptions) else "RSI"
+    minimum_source_candles = (
+        options.period + 1 if indicator_name == "RSI" else options.period
+    )
+    minimum_suffix = " plus 1" if indicator_name == "RSI" else ""
     if options.provider == "binance":
-        if options.period > options.limit:
+        if minimum_source_candles > options.limit:
             raise MarketDataProviderError(
-                "Binance source limit must be greater than or equal to EMA period",
+                "Binance source limit must be greater than or equal to "
+                f"{indicator_name} period{minimum_suffix}",
                 422,
             )
         return get_binance_market_data(
@@ -105,9 +182,10 @@ def _fetch_source_market_data(options: EmaIndicatorOptions) -> MarketDataRespons
         )
 
     if options.provider == "twelve-data":
-        if options.period > options.outputsize:
+        if minimum_source_candles > options.outputsize:
             raise MarketDataProviderError(
-                "Twelve Data outputsize must be greater than or equal to EMA period",
+                "Twelve Data outputsize must be greater than or equal to "
+                f"{indicator_name} period{minimum_suffix}",
                 422,
             )
         return get_twelve_data_market_data(

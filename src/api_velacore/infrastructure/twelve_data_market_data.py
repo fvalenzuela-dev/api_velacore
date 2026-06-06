@@ -267,7 +267,9 @@ class TwelveDataMarketDataClient:
         code_value = data.get("code", 0)
         try:
             code = int(cast(int | str, code_value) or 0)
-        except (TypeError, ValueError):
+        except TypeError:
+            code = 0
+        except ValueError:
             code = 0
         status_code = 429 if code == 429 else 422
         raise MarketDataProviderError(message, status_code)

@@ -178,9 +178,13 @@ mypy
 | Group | Method | Path | Purpose |
 |-------|--------|------|---------|
 | Health | `GET` | `/health` | Returns service health status. |
+| Binance | `GET` | `/market-data/binance/exchange-info` | Lists normalized Binance Spot trading symbols/pairs. |
 | Binance | `GET` | `/market-data/binance/{symbol}` | Returns normalized Binance Spot OHLCV candles for crypto pairs. |
 | Yahoo | `GET` | `/market-data/yahoo/{symbol}` | Returns normalized Yahoo Finance OHLCV candles for stocks and ETFs. |
 | Indicators | `GET` | `/indicators/ema/{symbol}` | Returns chart-ready EMA points derived from selected provider source candle closes. |
+| Twelve Data | `GET` | `/market-data/twelve-data/stocks` | Lists normalized Twelve Data stock assets. |
+| Twelve Data | `GET` | `/market-data/twelve-data/forex-pairs` | Lists normalized Twelve Data Forex pairs. |
+| Twelve Data | `GET` | `/market-data/twelve-data/etfs` | Lists normalized Twelve Data ETF assets. |
 | Twelve Data | `GET` | `/market-data/twelve-data/{symbol}` | Returns normalized Twelve Data OHLCV candles for stocks and ETFs. |
 | OpenAPI | `GET` | `/openapi.json` | Returns the OpenAPI schema. |
 
@@ -248,6 +252,34 @@ Supported Binance query parameters:
 | `startTime` / `endTime` | Explicit UTC range | Unix timestamps in milliseconds. |
 | `timeZone` | Kline interval timezone | Examples: `0`, `8`, `-1:00`, `05:45`. |
 | `limit` | Maximum candles | Default `500`, maximum `1000`. |
+
+Asset listing examples:
+
+```bash
+curl "http://127.0.0.1:8000/market-data/binance/exchange-info?symbolStatus=TRADING"
+VELACORE_TWELVE_DATA_API_KEY="your-api-key" uvicorn api_velacore.main:app --reload
+curl "http://127.0.0.1:8000/market-data/twelve-data/stocks?exchange=NASDAQ&country=United%20States&type=Common%20Stock"
+curl "http://127.0.0.1:8000/market-data/twelve-data/forex-pairs?currency_group=Major"
+curl "http://127.0.0.1:8000/market-data/twelve-data/etfs?exchange=NYSE&country=United%20States"
+```
+
+Supported Binance exchange-info listing parameters:
+
+| Parameter | Purpose | Values / notes |
+|-----------|---------|----------------|
+| `symbol` | Single trading symbol filter | Optional; mutually exclusive with `symbols` and `permissions`. |
+| `symbols` | Repeated trading symbol filters | Optional; use repeated query params such as `symbols=BTCUSDT&symbols=ETHUSDT`; mutually exclusive with `symbol` and `permissions`. |
+| `permissions` | Repeated Binance permission filters | Optional; forwarded to Binance as a list; cannot be combined with `symbol` or `symbols`. |
+| `showPermissionSets` | Include Binance permission set metadata | Boolean, default `true`. |
+| `symbolStatus` | Symbol status filter | Default `TRADING`. |
+
+Supported Twelve Data listing parameters:
+
+| Endpoint | Parameters |
+|----------|------------|
+| `/market-data/twelve-data/stocks` | `symbol`, `exchange` default `NASDAQ`, `mic_code`, `country` default `United States`, `type` default `Common Stock`. |
+| `/market-data/twelve-data/forex-pairs` | `symbol`, `currency_base`, `currency_quote`, `currency_group` default `Major`. |
+| `/market-data/twelve-data/etfs` | `symbol`, `exchange` default `NYSE`, `mic_code`, `country` default `United States`. |
 
 Market data responses are normalized and stateless; the backend does not persist
 candles in the database or local storage.

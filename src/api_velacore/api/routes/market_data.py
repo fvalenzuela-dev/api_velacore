@@ -3,11 +3,24 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, Query, status
 
 from api_velacore.infrastructure.market_data import MarketDataProviderError
-from api_velacore.schemas.market_data import MarketDataResponse
+from api_velacore.schemas.market_data import (
+    BinanceExchangeInfoResponse,
+    MarketDataResponse,
+    TwelveDataEtfsResponse,
+    TwelveDataForexPairsResponse,
+    TwelveDataStocksResponse,
+)
 from api_velacore.services.market_data import (
+    TwelveDataEtfListOptions,
+    TwelveDataForexPairsOptions,
     TwelveDataMarketDataOptions,
+    TwelveDataStockListOptions,
+    get_binance_exchange_info,
     get_binance_market_data,
+    get_twelve_data_etfs,
+    get_twelve_data_forex_pairs,
     get_twelve_data_market_data,
+    get_twelve_data_stocks,
     get_yahoo_market_data,
 )
 
@@ -57,6 +70,169 @@ def get_yahoo_market_data_endpoint(
             end=end,
             prepost=prepost,
             events=events,
+        )
+    except MarketDataProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.get(
+    "/binance/exchange-info",
+    response_model=BinanceExchangeInfoResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List Binance Spot trading symbols from exchange info",
+    tags=["binance"],
+)
+def get_binance_exchange_info_endpoint(
+    symbol: Annotated[
+        str | None,
+        Query(description="Optional Binance Spot symbol filter"),
+    ] = None,
+    symbols: Annotated[
+        list[str] | None,
+        Query(description="Optional repeated Binance Spot symbol filters"),
+    ] = None,
+    permissions: Annotated[
+        list[str] | None,
+        Query(description="Optional repeated Binance permission filters"),
+    ] = None,
+    show_permission_sets: Annotated[
+        bool,
+        Query(
+            alias="showPermissionSets",
+            description="Include Binance permission set metadata",
+        ),
+    ] = True,
+    symbol_status: Annotated[
+        str | None,
+        Query(alias="symbolStatus", description="Optional Binance symbol status"),
+    ] = "TRADING",
+) -> BinanceExchangeInfoResponse:
+    try:
+        return get_binance_exchange_info(
+            symbol=symbol,
+            symbols=symbols,
+            permissions=permissions,
+            show_permission_sets=show_permission_sets,
+            symbol_status=symbol_status,
+        )
+    except MarketDataProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.get(
+    "/twelve-data/stocks",
+    response_model=TwelveDataStocksResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List Twelve Data stock assets",
+    tags=["twelve-data"],
+)
+def get_twelve_data_stocks_endpoint(
+    symbol: Annotated[
+        str | None,
+        Query(description="Optional stock symbol filter"),
+    ] = None,
+    exchange: Annotated[
+        str,
+        Query(description="Stock exchange filter"),
+    ] = "NASDAQ",
+    mic_code: Annotated[
+        str | None,
+        Query(description="Optional market identifier code filter"),
+    ] = None,
+    country: Annotated[
+        str,
+        Query(description="Stock country filter"),
+    ] = "United States",
+    type: Annotated[
+        str,
+        Query(description="Twelve Data stock type filter"),
+    ] = "Common Stock",
+) -> TwelveDataStocksResponse:
+    try:
+        return get_twelve_data_stocks(
+            options=TwelveDataStockListOptions(
+                symbol=symbol,
+                exchange=exchange,
+                mic_code=mic_code,
+                country=country,
+                type=type,
+            ),
+        )
+    except MarketDataProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.get(
+    "/twelve-data/forex-pairs",
+    response_model=TwelveDataForexPairsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List Twelve Data Forex pairs",
+    tags=["twelve-data"],
+)
+def get_twelve_data_forex_pairs_endpoint(
+    symbol: Annotated[
+        str | None,
+        Query(description="Optional Forex pair filter such as EUR/USD"),
+    ] = None,
+    currency_base: Annotated[
+        str | None,
+        Query(description="Optional base currency filter"),
+    ] = None,
+    currency_quote: Annotated[
+        str | None,
+        Query(description="Optional quote currency filter"),
+    ] = None,
+    currency_group: Annotated[
+        str,
+        Query(description="Twelve Data currency group filter"),
+    ] = "Major",
+) -> TwelveDataForexPairsResponse:
+    try:
+        return get_twelve_data_forex_pairs(
+            options=TwelveDataForexPairsOptions(
+                symbol=symbol,
+                currency_base=currency_base,
+                currency_quote=currency_quote,
+                currency_group=currency_group,
+            ),
+        )
+    except MarketDataProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.get(
+    "/twelve-data/etfs",
+    response_model=TwelveDataEtfsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List Twelve Data ETF assets",
+    tags=["twelve-data"],
+)
+def get_twelve_data_etfs_endpoint(
+    symbol: Annotated[
+        str | None,
+        Query(description="Optional ETF symbol filter"),
+    ] = None,
+    exchange: Annotated[
+        str,
+        Query(description="ETF exchange filter"),
+    ] = "NYSE",
+    mic_code: Annotated[
+        str | None,
+        Query(description="Optional market identifier code filter"),
+    ] = None,
+    country: Annotated[
+        str,
+        Query(description="ETF country filter"),
+    ] = "United States",
+) -> TwelveDataEtfsResponse:
+    try:
+        return get_twelve_data_etfs(
+            options=TwelveDataEtfListOptions(
+                symbol=symbol,
+                exchange=exchange,
+                mic_code=mic_code,
+                country=country,
+            ),
         )
     except MarketDataProviderError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc

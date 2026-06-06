@@ -1,3 +1,4 @@
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -5,7 +6,18 @@ from typing import Any, NoReturn, cast
 
 import httpx
 
-from api_velacore.schemas.market_data import MarketDataCandle, MarketDataResponse
+from api_velacore.schemas.market_data import (
+    BinanceExchangeInfoResponse,
+    BinanceExchangeSymbol,
+    MarketDataCandle,
+    MarketDataResponse,
+    TwelveDataEtf,
+    TwelveDataEtfsResponse,
+    TwelveDataForexPair,
+    TwelveDataForexPairsResponse,
+    TwelveDataStock,
+    TwelveDataStocksResponse,
+)
 
 BINANCE_INTERVALS = frozenset(
     {
@@ -95,6 +107,15 @@ class BinanceKlineRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class BinanceExchangeInfoRequest:
+    symbol: str | None
+    symbols: tuple[str, ...]
+    permissions: tuple[str, ...]
+    show_permission_sets: bool
+    symbol_status: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class TwelveDataTimeSeriesRequest:
     symbol: str
     interval: str
@@ -104,6 +125,34 @@ class TwelveDataTimeSeriesRequest:
     exchange: str | None
     asset_type: str | None
     prepost: bool
+    api_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class TwelveDataStockListRequest:
+    symbol: str | None
+    exchange: str
+    mic_code: str | None
+    country: str
+    type: str
+    api_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class TwelveDataForexPairsRequest:
+    symbol: str | None
+    currency_base: str | None
+    currency_quote: str | None
+    currency_group: str
+    api_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class TwelveDataEtfListRequest:
+    symbol: str | None
+    exchange: str
+    mic_code: str | None
+    country: str
     api_key: str
 
 
@@ -165,6 +214,48 @@ def _float_at(values: list[Any], index: int) -> float | None:
     if index >= len(values):
         return None
     return _float_or_none(values[index])
+
+
+def _string_or_none(value: object) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def _required_string(
+    row: Mapping[str, Any],
+    key: str,
+    *,
+    provider_message: str,
+) -> str:
+    value = row.get(key)
+    if not isinstance(value, str) or not value:
+        raise MarketDataProviderError(provider_message, 502)
+    return value
+
+
+def _string_list(value: object, *, provider_message: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise MarketDataProviderError(provider_message, 502)
+    items: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise MarketDataProviderError(provider_message, 502)
+        items.append(item)
+    return items
+
+
+def _string_matrix(value: object, *, provider_message: str) -> list[list[str]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise MarketDataProviderError(provider_message, 502)
+    matrix: list[list[str]] = []
+    for row in value:
+        matrix.append(_string_list(row, provider_message=provider_message))
+    return matrix
 
 
 class YahooFinanceClient:
@@ -356,6 +447,42 @@ class BinanceMarketDataClient:
                 params[key] = value
         return params
 
+    def fetch_exchange_info(
+        self,
+        request: BinanceExchangeInfoRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> BinanceExchangeInfoResponse:
+        params = self._build_exchange_info_params(request)
+        data = self._get_json_object(
+            "/api/v3/exchangeInfo",
+            params=params,
+            timeout=timeout,
+        )
+        return self._normalize_exchange_info(data)
+
+    def _build_exchange_info_params(
+        self,
+        request: BinanceExchangeInfoRequest,
+    ) -> dict[str, str | bool]:
+        params: dict[str, str | bool] = {
+            "showPermissionSets": request.show_permission_sets,
+        }
+        optional_params = {
+            "symbol": request.symbol.upper() if request.symbol is not None else None,
+            "symbols": json.dumps([symbol.upper() for symbol in request.symbols])
+            if request.symbols
+            else None,
+            "permissions": json.dumps(list(request.permissions))
+            if request.permissions
+            else None,
+            "symbolStatus": request.symbol_status,
+        }
+        for key, value in optional_params.items():
+            if value is not None:
+                params[key] = value
+        return params
+
     def _get_json_rows(
         self,
         *,
@@ -373,6 +500,71 @@ class BinanceMarketDataClient:
         except httpx.HTTPError as exc:
             raise MarketDataProviderError("Binance request failed", 502) from exc
         return cast(list[Any], response.json())
+
+    def _get_json_object(
+        self,
+        path: str,
+        *,
+        params: Mapping[str, str | bool],
+        timeout: float,
+    ) -> dict[str, Any]:
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                response = client.get(f"{self.base_url}{path}", params=params)
+                response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise MarketDataProviderError("Binance request timed out", 504) from exc
+        except httpx.HTTPStatusError as exc:
+            self._raise_http_error(exc)
+        except httpx.HTTPError as exc:
+            raise MarketDataProviderError("Binance request failed", 502) from exc
+        return cast(dict[str, Any], response.json())
+
+    def _normalize_exchange_info(
+        self,
+        data: Mapping[str, Any],
+    ) -> BinanceExchangeInfoResponse:
+        symbols = data.get("symbols")
+        if not isinstance(symbols, list):
+            raise MarketDataProviderError(
+                "Binance returned malformed exchange info data", 502
+            )
+        return BinanceExchangeInfoResponse(
+            symbols=[self._normalize_exchange_symbol(row) for row in symbols]
+        )
+
+    def _normalize_exchange_symbol(self, row: object) -> BinanceExchangeSymbol:
+        if not isinstance(row, Mapping):
+            raise MarketDataProviderError(
+                "Binance returned malformed exchange info data", 502
+            )
+        typed_row = cast(Mapping[str, Any], row)
+        message = "Binance returned malformed exchange info data"
+        return BinanceExchangeSymbol(
+            symbol=_required_string(typed_row, "symbol", provider_message=message),
+            baseAsset=_required_string(
+                typed_row, "baseAsset", provider_message=message
+            ),
+            quoteAsset=_required_string(
+                typed_row, "quoteAsset", provider_message=message
+            ),
+            status=_required_string(typed_row, "status", provider_message=message),
+            permissions=_string_list(
+                typed_row.get("permissions"), provider_message=message
+            ),
+            permissionSets=_string_matrix(
+                typed_row.get("permissionSets"), provider_message=message
+            ),
+            isSpotTradingAllowed=cast(
+                bool | None, typed_row.get("isSpotTradingAllowed")
+            ),
+            isMarginTradingAllowed=cast(
+                bool | None, typed_row.get("isMarginTradingAllowed")
+            ),
+            orderTypes=_string_list(
+                typed_row.get("orderTypes"), provider_message=message
+            ),
+        )
 
     def _raise_http_error(self, exc: httpx.HTTPStatusError) -> NoReturn:
         if exc.response.status_code == 429:
@@ -416,6 +608,36 @@ class TwelveDataMarketDataClient:
         data = self._get_json(params=params, timeout=timeout)
         return self._normalize(request=request, data=data)
 
+    def fetch_stocks(
+        self,
+        request: TwelveDataStockListRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> TwelveDataStocksResponse:
+        params = self._build_stock_list_params(request)
+        data = self._get_json_from_path("/stocks", params=params, timeout=timeout)
+        return self._normalize_stocks(data)
+
+    def fetch_forex_pairs(
+        self,
+        request: TwelveDataForexPairsRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> TwelveDataForexPairsResponse:
+        params = self._build_forex_pairs_params(request)
+        data = self._get_json_from_path("/forex_pairs", params=params, timeout=timeout)
+        return self._normalize_forex_pairs(data)
+
+    def fetch_etfs(
+        self,
+        request: TwelveDataEtfListRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> TwelveDataEtfsResponse:
+        params = self._build_etf_list_params(request)
+        data = self._get_json_from_path("/etf", params=params, timeout=timeout)
+        return self._normalize_etfs(data)
+
     def _build_params(
         self,
         request: TwelveDataTimeSeriesRequest,
@@ -438,6 +660,78 @@ class TwelveDataMarketDataClient:
                 params[key] = value
         return params
 
+    def _build_stock_list_params(
+        self,
+        request: TwelveDataStockListRequest,
+    ) -> dict[str, str]:
+        params = {
+            "exchange": request.exchange,
+            "country": request.country,
+            "type": request.type,
+            "apikey": request.api_key,
+        }
+        return self._with_optional_params(
+            params,
+            {
+                "symbol": request.symbol.upper()
+                if request.symbol is not None
+                else None,
+                "mic_code": request.mic_code,
+            },
+        )
+
+    def _build_forex_pairs_params(
+        self,
+        request: TwelveDataForexPairsRequest,
+    ) -> dict[str, str]:
+        params = {
+            "currency_group": request.currency_group,
+            "apikey": request.api_key,
+        }
+        return self._with_optional_params(
+            params,
+            {
+                "symbol": request.symbol.upper()
+                if request.symbol is not None
+                else None,
+                "currency_base": request.currency_base.upper()
+                if request.currency_base is not None
+                else None,
+                "currency_quote": request.currency_quote.upper()
+                if request.currency_quote is not None
+                else None,
+            },
+        )
+
+    def _build_etf_list_params(
+        self,
+        request: TwelveDataEtfListRequest,
+    ) -> dict[str, str]:
+        params = {
+            "exchange": request.exchange,
+            "country": request.country,
+            "apikey": request.api_key,
+        }
+        return self._with_optional_params(
+            params,
+            {
+                "symbol": request.symbol.upper()
+                if request.symbol is not None
+                else None,
+                "mic_code": request.mic_code,
+            },
+        )
+
+    def _with_optional_params(
+        self,
+        params: dict[str, str],
+        optional_params: Mapping[str, str | None],
+    ) -> dict[str, str]:
+        for key, value in optional_params.items():
+            if value is not None:
+                params[key] = value
+        return params
+
     def _provider_type(self, asset_type: str | None) -> str | None:
         if asset_type is None:
             return None
@@ -449,9 +743,22 @@ class TwelveDataMarketDataClient:
         params: Mapping[str, str | int | bool],
         timeout: float,
     ) -> dict[str, Any]:
+        return self._get_json_from_path(
+            "/time_series",
+            params=params,
+            timeout=timeout,
+        )
+
+    def _get_json_from_path(
+        self,
+        path: str,
+        *,
+        params: Mapping[str, str | int | bool],
+        timeout: float,
+    ) -> dict[str, Any]:
         try:
             with httpx.Client(timeout=timeout) as client:
-                response = client.get(f"{self.base_url}/time_series", params=params)
+                response = client.get(f"{self.base_url}{path}", params=params)
                 response.raise_for_status()
         except httpx.TimeoutException as exc:
             message = "Twelve Data request timed out"
@@ -504,6 +811,89 @@ class TwelveDataMarketDataClient:
             code = 0
         status_code = 429 if code == 429 else 422
         raise MarketDataProviderError(message, status_code)
+
+    def _normalize_stocks(self, data: Mapping[str, Any]) -> TwelveDataStocksResponse:
+        rows = self._extract_listing_rows(data)
+        return TwelveDataStocksResponse(
+            stocks=[self._normalize_stock(row) for row in rows]
+        )
+
+    def _normalize_forex_pairs(
+        self,
+        data: Mapping[str, Any],
+    ) -> TwelveDataForexPairsResponse:
+        rows = self._extract_listing_rows(data)
+        return TwelveDataForexPairsResponse(
+            forex_pairs=[self._normalize_forex_pair(row) for row in rows]
+        )
+
+    def _normalize_etfs(self, data: Mapping[str, Any]) -> TwelveDataEtfsResponse:
+        rows = self._extract_listing_rows(data)
+        return TwelveDataEtfsResponse(etfs=[self._normalize_etf(row) for row in rows])
+
+    def _extract_listing_rows(self, data: Mapping[str, Any]) -> list[Any]:
+        self._raise_api_error(data)
+        rows = data.get("data")
+        if not isinstance(rows, list):
+            raise MarketDataProviderError(
+                "Twelve Data returned malformed listing data", 502
+            )
+        return rows
+
+    def _normalize_stock(self, row: object) -> TwelveDataStock:
+        typed_row = self._typed_listing_row(row)
+        return TwelveDataStock(
+            symbol=_required_string(
+                typed_row,
+                "symbol",
+                provider_message="Twelve Data returned malformed listing data",
+            ),
+            name=_string_or_none(typed_row.get("name")),
+            currency=_string_or_none(typed_row.get("currency")),
+            exchange=_string_or_none(typed_row.get("exchange")),
+            mic_code=_string_or_none(typed_row.get("mic_code")),
+            country=_string_or_none(typed_row.get("country")),
+            type=_string_or_none(typed_row.get("type")),
+        )
+
+    def _normalize_forex_pair(self, row: object) -> TwelveDataForexPair:
+        typed_row = self._typed_listing_row(row)
+        return TwelveDataForexPair(
+            symbol=_required_string(
+                typed_row,
+                "symbol",
+                provider_message="Twelve Data returned malformed listing data",
+            ),
+            currency_group=_string_or_none(typed_row.get("currency_group")),
+            currency_base=_string_or_none(typed_row.get("currency_base")),
+            currency_quote=_string_or_none(typed_row.get("currency_quote")),
+        )
+
+    def _normalize_etf(self, row: object) -> TwelveDataEtf:
+        typed_row = self._typed_listing_row(row)
+        return TwelveDataEtf(
+            symbol=_required_string(
+                typed_row,
+                "symbol",
+                provider_message="Twelve Data returned malformed listing data",
+            ),
+            name=_string_or_none(typed_row.get("name")),
+            currency=_string_or_none(typed_row.get("currency")),
+            exchange=_string_or_none(typed_row.get("exchange")),
+            mic_code=_string_or_none(typed_row.get("mic_code")),
+            country=_string_or_none(typed_row.get("country")),
+            figi_code=_string_or_none(typed_row.get("figi_code")),
+            cfi_code=_string_or_none(typed_row.get("cfi_code")),
+            isin=_string_or_none(typed_row.get("isin")),
+            cusip=_string_or_none(typed_row.get("cusip")),
+        )
+
+    def _typed_listing_row(self, row: object) -> Mapping[str, Any]:
+        if not isinstance(row, Mapping):
+            raise MarketDataProviderError(
+                "Twelve Data returned malformed listing data", 502
+            )
+        return cast(Mapping[str, Any], row)
 
     def _normalize_row(self, row: Any) -> MarketDataCandle:
         if not isinstance(row, Mapping):

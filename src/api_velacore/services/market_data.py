@@ -7,15 +7,25 @@ from api_velacore.infrastructure.market_data import (
     TWELVE_DATA_INTERVALS,
     YAHOO_INTERVALS,
     YAHOO_PERIODS,
+    BinanceExchangeInfoRequest,
     BinanceKlineRequest,
     BinanceMarketDataClient,
     MarketDataProviderError,
+    TwelveDataEtfListRequest,
+    TwelveDataForexPairsRequest,
     TwelveDataMarketDataClient,
+    TwelveDataStockListRequest,
     TwelveDataTimeSeriesRequest,
     YahooChartRequest,
     YahooFinanceClient,
 )
-from api_velacore.schemas.market_data import MarketDataResponse
+from api_velacore.schemas.market_data import (
+    BinanceExchangeInfoResponse,
+    MarketDataResponse,
+    TwelveDataEtfsResponse,
+    TwelveDataForexPairsResponse,
+    TwelveDataStocksResponse,
+)
 
 
 def get_yahoo_market_data(
@@ -77,6 +87,36 @@ def get_binance_market_data(
     return binance_client.fetch_klines(request)
 
 
+def get_binance_exchange_info(
+    *,
+    symbol: str | None,
+    symbols: list[str] | None,
+    permissions: list[str] | None,
+    show_permission_sets: bool,
+    symbol_status: str | None,
+    client: BinanceMarketDataClient | None = None,
+) -> BinanceExchangeInfoResponse:
+    normalized_symbol = _optional_string(symbol)
+    normalized_symbols = _optional_strings(symbols)
+    normalized_permissions = _optional_strings(permissions)
+    if normalized_symbol is not None and normalized_symbols:
+        raise MarketDataProviderError("Use either symbol or symbols, not both", 422)
+    if normalized_permissions and (normalized_symbol is not None or normalized_symbols):
+        raise MarketDataProviderError(
+            "Use permissions without symbol or symbols filters",
+            422,
+        )
+    request = BinanceExchangeInfoRequest(
+        symbol=normalized_symbol,
+        symbols=tuple(normalized_symbols),
+        permissions=tuple(normalized_permissions),
+        show_permission_sets=show_permission_sets,
+        symbol_status=_optional_string(symbol_status),
+    )
+    binance_client = client or BinanceMarketDataClient()
+    return binance_client.fetch_exchange_info(request)
+
+
 @dataclass(frozen=True)
 class TwelveDataMarketDataOptions:
     symbol: str
@@ -87,6 +127,31 @@ class TwelveDataMarketDataOptions:
     exchange: str | None
     asset_type: str | None
     prepost: bool
+
+
+@dataclass(frozen=True)
+class TwelveDataStockListOptions:
+    symbol: str | None
+    exchange: str
+    mic_code: str | None
+    country: str
+    type: str
+
+
+@dataclass(frozen=True)
+class TwelveDataForexPairsOptions:
+    symbol: str | None
+    currency_base: str | None
+    currency_quote: str | None
+    currency_group: str
+
+
+@dataclass(frozen=True)
+class TwelveDataEtfListOptions:
+    symbol: str | None
+    exchange: str
+    mic_code: str | None
+    country: str
 
 
 def get_twelve_data_market_data(
@@ -100,6 +165,61 @@ def get_twelve_data_market_data(
     request = _build_twelve_data_request(options, resolved_api_key)
     twelve_data_client = client or TwelveDataMarketDataClient()
     return twelve_data_client.fetch_time_series(request)
+
+
+def get_twelve_data_stocks(
+    *,
+    options: TwelveDataStockListOptions,
+    api_key: str | None = None,
+    client: TwelveDataMarketDataClient | None = None,
+) -> TwelveDataStocksResponse:
+    resolved_api_key = _resolve_twelve_data_api_key(api_key)
+    request = TwelveDataStockListRequest(
+        symbol=_optional_string(options.symbol),
+        exchange=options.exchange,
+        mic_code=_optional_string(options.mic_code),
+        country=options.country,
+        type=options.type,
+        api_key=resolved_api_key,
+    )
+    twelve_data_client = client or TwelveDataMarketDataClient()
+    return twelve_data_client.fetch_stocks(request)
+
+
+def get_twelve_data_forex_pairs(
+    *,
+    options: TwelveDataForexPairsOptions,
+    api_key: str | None = None,
+    client: TwelveDataMarketDataClient | None = None,
+) -> TwelveDataForexPairsResponse:
+    resolved_api_key = _resolve_twelve_data_api_key(api_key)
+    request = TwelveDataForexPairsRequest(
+        symbol=_optional_string(options.symbol),
+        currency_base=_optional_string(options.currency_base),
+        currency_quote=_optional_string(options.currency_quote),
+        currency_group=options.currency_group,
+        api_key=resolved_api_key,
+    )
+    twelve_data_client = client or TwelveDataMarketDataClient()
+    return twelve_data_client.fetch_forex_pairs(request)
+
+
+def get_twelve_data_etfs(
+    *,
+    options: TwelveDataEtfListOptions,
+    api_key: str | None = None,
+    client: TwelveDataMarketDataClient | None = None,
+) -> TwelveDataEtfsResponse:
+    resolved_api_key = _resolve_twelve_data_api_key(api_key)
+    request = TwelveDataEtfListRequest(
+        symbol=_optional_string(options.symbol),
+        exchange=options.exchange,
+        mic_code=_optional_string(options.mic_code),
+        country=options.country,
+        api_key=resolved_api_key,
+    )
+    twelve_data_client = client or TwelveDataMarketDataClient()
+    return twelve_data_client.fetch_etfs(request)
 
 
 def _validate_twelve_data_options(options: TwelveDataMarketDataOptions) -> None:
@@ -143,3 +263,16 @@ def _build_twelve_data_request(
         prepost=options.prepost,
         api_key=api_key,
     )
+
+
+def _optional_string(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _optional_strings(values: list[str] | None) -> list[str]:
+    if values is None:
+        return []
+    return [stripped for value in values if (stripped := value.strip())]

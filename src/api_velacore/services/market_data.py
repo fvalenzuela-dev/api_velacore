@@ -106,12 +106,15 @@ def get_binance_exchange_info(
             "Use permissions without symbol or symbols filters",
             422,
         )
+    effective_symbol_status = None
+    if normalized_symbol is None and not normalized_symbols:
+        effective_symbol_status = _optional_string(symbol_status)
     request = BinanceExchangeInfoRequest(
         symbol=normalized_symbol,
         symbols=tuple(normalized_symbols),
         permissions=tuple(normalized_permissions),
         show_permission_sets=show_permission_sets,
-        symbol_status=_optional_string(symbol_status),
+        symbol_status=effective_symbol_status,
     )
     binance_client = client or BinanceMarketDataClient()
     return binance_client.fetch_exchange_info(request)

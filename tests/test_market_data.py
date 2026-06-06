@@ -253,7 +253,7 @@ def test_binance_exchange_info_endpoint_uses_defaults_and_returns_symbols(
         _CHECK.assertIsNone(kwargs["symbol"])
         _CHECK.assertIsNone(kwargs["symbols"])
         _CHECK.assertIsNone(kwargs["permissions"])
-        _CHECK.assertEqual(kwargs["show_permission_sets"], True)
+        _CHECK.assertEqual(kwargs["show_permission_sets"], False)
         _CHECK.assertEqual(kwargs["symbol_status"], "TRADING")
         return _sample_binance_exchange_info_response()
 
@@ -714,6 +714,7 @@ def test_listing_services_forward_normalized_requests() -> None:
     _CHECK.assertEqual(binance_request.symbols, ("btcusdt",))
     _CHECK.assertEqual(binance_request.permissions, ())
     _CHECK.assertEqual(binance_request.show_permission_sets, False)
+    _CHECK.assertIsNone(binance_request.symbol_status)
 
     twelve_data_client = StubTwelveDataListingClient()
     get_twelve_data_stocks(
@@ -970,18 +971,18 @@ def test_binance_fetch_exchange_info_uses_params_and_normalizes_response() -> No
     request = BinanceExchangeInfoRequest(
         symbol=None,
         symbols=("btcusdt", "ethusdt"),
-        permissions=("SPOT",),
+        permissions=(),
         show_permission_sets=False,
-        symbol_status="TRADING",
+        symbol_status=None,
     )
 
     response = client.fetch_exchange_info(request, timeout=2.0)
 
     _CHECK.assertEqual(client.seen_path, "/api/v3/exchangeInfo")
     _CHECK.assertEqual(client.seen_params["symbols"], '["BTCUSDT", "ETHUSDT"]')
-    _CHECK.assertEqual(client.seen_params["permissions"], '["SPOT"]')
+    _CHECK.assertNotIn("permissions", client.seen_params)
     _CHECK.assertEqual(client.seen_params["showPermissionSets"], False)
-    _CHECK.assertEqual(client.seen_params["symbolStatus"], "TRADING")
+    _CHECK.assertNotIn("symbolStatus", client.seen_params)
     _CHECK.assertEqual(client.seen_timeout, 2.0)
     _CHECK.assertEqual(response.symbols[0].baseAsset, "BTC")
     _CHECK.assertEqual(response.symbols[0].permissionSets, [["SPOT"]])

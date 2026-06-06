@@ -101,7 +101,7 @@ def get_binance_exchange_info_endpoint(
             alias="showPermissionSets",
             description="Include Binance permission set metadata",
         ),
-    ] = True,
+    ] = False,
     symbol_status: Annotated[
         str | None,
         Query(alias="symbolStatus", description="Optional Binance symbol status"),

@@ -270,7 +270,7 @@ Supported Binance exchange-info listing parameters:
 | `symbol` | Single trading symbol filter | Optional; mutually exclusive with `symbols` and `permissions`. |
 | `symbols` | Repeated trading symbol filters | Optional; use repeated query params such as `symbols=BTCUSDT&symbols=ETHUSDT`; mutually exclusive with `symbol` and `permissions`. |
 | `permissions` | Repeated Binance permission filters | Optional; forwarded to Binance as a list; cannot be combined with `symbol` or `symbols`. |
-| `showPermissionSets` | Include Binance permission set metadata | Boolean, default `true`. |
+| `showPermissionSets` | Include Binance permission set metadata | Boolean, default `false`; enabling it can make the response several MB. |
 | `symbolStatus` | Symbol status filter | Default `TRADING`. |
 
 Supported Twelve Data listing parameters:

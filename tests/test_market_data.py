@@ -653,54 +653,56 @@ def test_binance_exchange_info_service_validates_exclusive_symbol_filters() -> N
             _CHECK.fail("Expected MarketDataProviderError")
 
 
-def test_listing_services_forward_normalized_requests() -> None:
-    class StubBinanceExchangeInfoClient(BinanceMarketDataClient):
-        def __init__(self) -> None:
-            self.request: BinanceExchangeInfoRequest | None = None
+class _StubBinanceExchangeInfoClient(BinanceMarketDataClient):
+    def __init__(self) -> None:
+        self.request: BinanceExchangeInfoRequest | None = None
 
-        def fetch_exchange_info(
-            self,
-            request: BinanceExchangeInfoRequest,
-            *,
-            timeout: float = 10.0,
-        ) -> BinanceExchangeInfoResponse:
-            self.request = request
-            return _sample_binance_exchange_info_response()
+    def fetch_exchange_info(
+        self,
+        request: BinanceExchangeInfoRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> BinanceExchangeInfoResponse:
+        self.request = request
+        return _sample_binance_exchange_info_response()
 
-    class StubTwelveDataListingClient(TwelveDataMarketDataClient):
-        def __init__(self) -> None:
-            self.stock_request: TwelveDataStockListRequest | None = None
-            self.forex_request: TwelveDataForexPairsRequest | None = None
-            self.etf_request: TwelveDataEtfListRequest | None = None
 
-        def fetch_stocks(
-            self,
-            request: TwelveDataStockListRequest,
-            *,
-            timeout: float = 10.0,
-        ) -> TwelveDataStocksResponse:
-            self.stock_request = request
-            return _sample_twelve_data_stocks_response()
+class _StubTwelveDataListingClient(TwelveDataMarketDataClient):
+    def __init__(self) -> None:
+        self.stock_request: TwelveDataStockListRequest | None = None
+        self.forex_request: TwelveDataForexPairsRequest | None = None
+        self.etf_request: TwelveDataEtfListRequest | None = None
 
-        def fetch_forex_pairs(
-            self,
-            request: TwelveDataForexPairsRequest,
-            *,
-            timeout: float = 10.0,
-        ) -> TwelveDataForexPairsResponse:
-            self.forex_request = request
-            return _sample_twelve_data_forex_pairs_response()
+    def fetch_stocks(
+        self,
+        request: TwelveDataStockListRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> TwelveDataStocksResponse:
+        self.stock_request = request
+        return _sample_twelve_data_stocks_response()
 
-        def fetch_etfs(
-            self,
-            request: TwelveDataEtfListRequest,
-            *,
-            timeout: float = 10.0,
-        ) -> TwelveDataEtfsResponse:
-            self.etf_request = request
-            return _sample_twelve_data_etfs_response()
+    def fetch_forex_pairs(
+        self,
+        request: TwelveDataForexPairsRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> TwelveDataForexPairsResponse:
+        self.forex_request = request
+        return _sample_twelve_data_forex_pairs_response()
 
-    binance_client = StubBinanceExchangeInfoClient()
+    def fetch_etfs(
+        self,
+        request: TwelveDataEtfListRequest,
+        *,
+        timeout: float = 10.0,
+    ) -> TwelveDataEtfsResponse:
+        self.etf_request = request
+        return _sample_twelve_data_etfs_response()
+
+
+def test_listing_services_forward_binance_request() -> None:
+    binance_client = _StubBinanceExchangeInfoClient()
     get_binance_exchange_info(
         symbol=" ",
         symbols=["btcusdt", ""],
@@ -716,7 +718,9 @@ def test_listing_services_forward_normalized_requests() -> None:
     _CHECK.assertEqual(binance_request.show_permission_sets, False)
     _CHECK.assertIsNone(binance_request.symbol_status)
 
-    twelve_data_client = StubTwelveDataListingClient()
+
+def test_listing_services_forward_twelve_data_requests() -> None:
+    twelve_data_client = _StubTwelveDataListingClient()
     get_twelve_data_stocks(
         options=TwelveDataStockListOptions(
             symbol="aapl",
@@ -984,72 +988,58 @@ def test_binance_fetch_exchange_info_uses_params_and_normalizes_response() -> No
     _CHECK.assertEqual(client.seen_params["showPermissionSets"], False)
     _CHECK.assertNotIn("symbolStatus", client.seen_params)
     _CHECK.assertEqual(client.seen_timeout, 2.0)
-    _CHECK.assertEqual(response.symbols[0].baseAsset, "BTC")
-    _CHECK.assertEqual(response.symbols[0].permissionSets, [["SPOT"]])
+    _CHECK.assertEqual(response.symbols[0].base_asset, "BTC")
+    _CHECK.assertEqual(response.symbols[0].permission_sets, [["SPOT"]])
 
 
-def test_twelve_data_listing_clients_use_paths_params_and_normalize() -> None:
-    class StubTwelveDataListingHttpClient(TwelveDataMarketDataClient):
-        def __init__(self, payloads: dict[str, dict[str, Any]]) -> None:
-            self.payloads = payloads
-            self.seen: list[tuple[str, Mapping[str, str | int | bool], float]] = []
+class _StubTwelveDataListingHttpClient(TwelveDataMarketDataClient):
+    def __init__(self, payloads: dict[str, dict[str, Any]]) -> None:
+        self.payloads = payloads
+        self.seen: list[tuple[str, Mapping[str, str | int | bool], float]] = []
 
-        def _get_json_from_path(
-            self,
-            path: str,
-            *,
-            params: Mapping[str, str | int | bool],
-            timeout: float,
-        ) -> dict[str, Any]:
-            self.seen.append((path, params, timeout))
-            return self.payloads[path]
+    def _get_json_from_path(
+        self,
+        path: str,
+        *,
+        params: Mapping[str, str | int | bool],
+        timeout: float,
+    ) -> dict[str, Any]:
+        self.seen.append((path, params, timeout))
+        return self.payloads[path]
 
-    client = StubTwelveDataListingHttpClient(
-        {
-            "/stocks": {
-                "data": [
-                    {
-                        "symbol": "AAPL",
-                        "name": "Apple Inc",
-                        "currency": "USD",
-                        "exchange": "NASDAQ",
-                        "mic_code": "XNAS",
-                        "country": "United States",
-                        "type": "Common Stock",
-                    }
-                ],
-                "status": "ok",
-            },
-            "/forex_pairs": {
-                "data": [
-                    {
-                        "symbol": "EUR/USD",
-                        "currency_group": "Major",
-                        "currency_base": "Euro",
-                        "currency_quote": "US Dollar",
-                    }
-                ],
-                "status": "ok",
-            },
-            "/etf": {
-                "data": [
-                    {
-                        "symbol": "SPY",
-                        "name": "SPDR S&P 500 ETF Trust",
-                        "currency": "USD",
-                        "exchange": "NYSE",
-                        "mic_code": "XNYS",
-                        "country": "United States",
-                        "figi_code": "BBG000BDTBL9",
-                        "cfi_code": "CEOJLS",
-                        "isin": "US78462F1030",
-                        "cusip": "78462F103",
-                    }
-                ],
-                "status": "ok",
-            },
-        }
-    )
+
+def _twelve_data_listing_payloads() -> dict[str, dict[str, Any]]:
+    return {
+        "/stocks": {
+            "data": [{"symbol": "AAPL", "name": "Apple Inc", "type": "Common Stock"}],
+            "status": "ok",
+        },
+        "/forex_pairs": {
+            "data": [
+                {
+                    "symbol": "EUR/USD",
+                    "currency_group": "Major",
+                    "currency_base": "Euro",
+                    "currency_quote": "US Dollar",
+                }
+            ],
+            "status": "ok",
+        },
+        "/etf": {
+            "data": [
+                {
+                    "symbol": "SPY",
+                    "name": "SPDR S&P 500 ETF Trust",
+                    "isin": "US78462F1030",
+                }
+            ],
+            "status": "ok",
+        },
+    }
+
+
+def test_twelve_data_stock_listing_client_uses_path_params_and_normalizes() -> None:
+    client = _StubTwelveDataListingHttpClient(_twelve_data_listing_payloads())
 
     stocks = client.fetch_stocks(
         TwelveDataStockListRequest(
@@ -1057,24 +1047,37 @@ def test_twelve_data_listing_clients_use_paths_params_and_normalize() -> None:
         ),
         timeout=3.0,
     )
-    forex_pairs = client.fetch_forex_pairs(
-        TwelveDataForexPairsRequest("eur/usd", "eur", "usd", "Major", "key"),
-        timeout=4.0,
-    )
-    etfs = client.fetch_etfs(
-        TwelveDataEtfListRequest("spy", "NYSE", "XNYS", "United States", "key"),
-        timeout=5.0,
-    )
 
     _CHECK.assertEqual(client.seen[0][0], "/stocks")
     _CHECK.assertEqual(client.seen[0][1]["symbol"], "AAPL")
     _CHECK.assertEqual(client.seen[0][1]["apikey"], "key")
     _CHECK.assertEqual(client.seen[0][2], 3.0)
     _CHECK.assertEqual(stocks.stocks[0].name, "Apple Inc")
-    _CHECK.assertEqual(client.seen[1][0], "/forex_pairs")
-    _CHECK.assertEqual(client.seen[1][1]["currency_base"], "EUR")
+
+
+def test_twelve_data_forex_listing_client_uses_path_params_and_normalizes() -> None:
+    client = _StubTwelveDataListingHttpClient(_twelve_data_listing_payloads())
+
+    forex_pairs = client.fetch_forex_pairs(
+        TwelveDataForexPairsRequest("eur/usd", "eur", "usd", "Major", "key"),
+        timeout=4.0,
+    )
+
+    _CHECK.assertEqual(client.seen[0][0], "/forex_pairs")
+    _CHECK.assertEqual(client.seen[0][1]["currency_base"], "EUR")
     _CHECK.assertEqual(forex_pairs.forex_pairs[0].currency_quote, "US Dollar")
-    _CHECK.assertEqual(client.seen[2][0], "/etf")
+
+
+def test_twelve_data_etf_listing_client_uses_path_params_and_normalizes() -> None:
+    client = _StubTwelveDataListingHttpClient(_twelve_data_listing_payloads())
+
+    etfs = client.fetch_etfs(
+        TwelveDataEtfListRequest("spy", "NYSE", "XNYS", "United States", "key"),
+        timeout=5.0,
+    )
+
+    _CHECK.assertEqual(client.seen[0][0], "/etf")
+    _CHECK.assertEqual(client.seen[0][1]["symbol"], "SPY")
     _CHECK.assertEqual(etfs.etfs[0].isin, "US78462F1030")
 
 

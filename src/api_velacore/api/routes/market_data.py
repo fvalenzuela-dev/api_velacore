@@ -143,9 +143,9 @@ def get_twelve_data_stocks_endpoint(
         str,
         Query(description="Stock country filter"),
     ] = "United States",
-    type: Annotated[
+    stock_type: Annotated[
         str,
-        Query(description="Twelve Data stock type filter"),
+        Query(alias="type", description="Twelve Data stock type filter"),
     ] = "Common Stock",
 ) -> TwelveDataStocksResponse:
     try:
@@ -155,7 +155,7 @@ def get_twelve_data_stocks_endpoint(
                 exchange=exchange,
                 mic_code=mic_code,
                 country=country,
-                type=type,
+                type=stock_type,
             ),
         )
     except MarketDataProviderError as exc:

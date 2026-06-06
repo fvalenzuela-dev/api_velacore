@@ -99,25 +99,50 @@ def get_binance_exchange_info(
     normalized_symbol = _optional_string(symbol)
     normalized_symbols = _optional_strings(symbols)
     normalized_permissions = _optional_strings(permissions)
-    if normalized_symbol is not None and normalized_symbols:
-        raise MarketDataProviderError("Use either symbol or symbols, not both", 422)
-    if normalized_permissions and (normalized_symbol is not None or normalized_symbols):
-        raise MarketDataProviderError(
-            "Use permissions without symbol or symbols filters",
-            422,
-        )
-    effective_symbol_status = None
-    if normalized_symbol is None and not normalized_symbols:
-        effective_symbol_status = _optional_string(symbol_status)
+    _validate_binance_exchange_info_filters(
+        symbol=normalized_symbol,
+        symbols=normalized_symbols,
+        permissions=normalized_permissions,
+    )
     request = BinanceExchangeInfoRequest(
         symbol=normalized_symbol,
         symbols=tuple(normalized_symbols),
         permissions=tuple(normalized_permissions),
         show_permission_sets=show_permission_sets,
-        symbol_status=effective_symbol_status,
+        symbol_status=_binance_exchange_info_symbol_status(
+            symbol=normalized_symbol,
+            symbols=normalized_symbols,
+            symbol_status=symbol_status,
+        ),
     )
     binance_client = client or BinanceMarketDataClient()
     return binance_client.fetch_exchange_info(request)
+
+
+def _validate_binance_exchange_info_filters(
+    *,
+    symbol: str | None,
+    symbols: list[str],
+    permissions: list[str],
+) -> None:
+    if symbol is not None and symbols:
+        raise MarketDataProviderError("Use either symbol or symbols, not both", 422)
+    if permissions and (symbol is not None or symbols):
+        raise MarketDataProviderError(
+            "Use permissions without symbol or symbols filters",
+            422,
+        )
+
+
+def _binance_exchange_info_symbol_status(
+    *,
+    symbol: str | None,
+    symbols: list[str],
+    symbol_status: str | None,
+) -> str | None:
+    if symbol is not None or symbols:
+        return None
+    return _optional_string(symbol_status)
 
 
 @dataclass(frozen=True)

@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -540,30 +541,49 @@ class BinanceMarketDataClient:
             )
         typed_row = cast(Mapping[str, Any], row)
         message = "Binance returned malformed exchange info data"
-        return BinanceExchangeSymbol(
-            symbol=_required_string(typed_row, "symbol", provider_message=message),
-            baseAsset=_required_string(
-                typed_row, "baseAsset", provider_message=message
-            ),
-            quoteAsset=_required_string(
-                typed_row, "quoteAsset", provider_message=message
-            ),
-            status=_required_string(typed_row, "status", provider_message=message),
-            permissions=_string_list(
-                typed_row.get("permissions"), provider_message=message
-            ),
-            permissionSets=_string_matrix(
-                typed_row.get("permissionSets"), provider_message=message
-            ),
-            isSpotTradingAllowed=cast(
-                bool | None, typed_row.get("isSpotTradingAllowed")
-            ),
-            isMarginTradingAllowed=cast(
-                bool | None, typed_row.get("isMarginTradingAllowed")
-            ),
-            orderTypes=_string_list(
-                typed_row.get("orderTypes"), provider_message=message
-            ),
+        return BinanceExchangeSymbol.model_validate(
+            {
+                "symbol": _required_string(
+                    typed_row,
+                    "symbol",
+                    provider_message=message,
+                ),
+                "baseAsset": _required_string(
+                    typed_row,
+                    "baseAsset",
+                    provider_message=message,
+                ),
+                "quoteAsset": _required_string(
+                    typed_row,
+                    "quoteAsset",
+                    provider_message=message,
+                ),
+                "status": _required_string(
+                    typed_row,
+                    "status",
+                    provider_message=message,
+                ),
+                "permissions": _string_list(
+                    typed_row.get("permissions"),
+                    provider_message=message,
+                ),
+                "permissionSets": _string_matrix(
+                    typed_row.get("permissionSets"),
+                    provider_message=message,
+                ),
+                "isSpotTradingAllowed": cast(
+                    bool | None,
+                    typed_row.get("isSpotTradingAllowed"),
+                ),
+                "isMarginTradingAllowed": cast(
+                    bool | None,
+                    typed_row.get("isMarginTradingAllowed"),
+                ),
+                "orderTypes": _string_list(
+                    typed_row.get("orderTypes"),
+                    provider_message=message,
+                ),
+            }
         )
 
     def _raise_http_error(self, exc: httpx.HTTPStatusError) -> NoReturn:

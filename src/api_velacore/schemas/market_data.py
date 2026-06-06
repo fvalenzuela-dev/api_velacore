@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 MarketDataProvider = Literal["yahoo", "binance", "twelve-data"]
 
@@ -24,15 +24,26 @@ class MarketDataResponse(BaseModel):
 
 
 class BinanceExchangeSymbol(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
     symbol: str
-    baseAsset: str
-    quoteAsset: str
+    base_asset: str = Field(alias="baseAsset")
+    quote_asset: str = Field(alias="quoteAsset")
     status: str
     permissions: list[str] = Field(default_factory=list)
-    permissionSets: list[list[str]] = Field(default_factory=list)
-    isSpotTradingAllowed: bool | None = None
-    isMarginTradingAllowed: bool | None = None
-    orderTypes: list[str] = Field(default_factory=list)
+    permission_sets: list[list[str]] = Field(
+        default_factory=list,
+        alias="permissionSets",
+    )
+    is_spot_trading_allowed: bool | None = Field(
+        default=None,
+        alias="isSpotTradingAllowed",
+    )
+    is_margin_trading_allowed: bool | None = Field(
+        default=None,
+        alias="isMarginTradingAllowed",
+    )
+    order_types: list[str] = Field(default_factory=list, alias="orderTypes")
 
 
 class BinanceExchangeInfoResponse(BaseModel):
